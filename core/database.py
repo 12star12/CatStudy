@@ -25,7 +25,8 @@ DB_PATH: Path = DATA_DIR / "catstudy.db"
 
 # 当前 schema 版本；未来改表结构时递增，并在 _migrate 中补对应步骤
 # v1 -> v2：study_date 的 CHECK 由"仅格式正则"改为"格式 + 真实日历日期"
-SCHEMA_VERSION: int = 2
+# v2 -> v3：新增 source 列，标记记录来源（番茄钟 / 正计时 / 手工录入）
+SCHEMA_VERSION: int = 3
 
 # ---------- 表结构 ----------
 
@@ -53,6 +54,10 @@ CREATE TABLE IF NOT EXISTS app_meta (
 #
 # - created_at / updated_at 由 datetime('now','localtime') 兜底，
 #   即使绕过仓储层直接写库也能得到本地时间
+#
+# - source 记录这条记录从哪来（'pomodoro' / 'stopwatch' / NULL=手工录入）。
+#   故意不写 CHECK 约束：来源种类还会增加（例如将来的任务打卡），
+#   加约束会让每次新增来源都要重建表；合法性由仓储层负责。
 _TABLE_STUDY_RECORDS = """
 CREATE TABLE IF NOT EXISTS study_records (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +66,7 @@ CREATE TABLE IF NOT EXISTS study_records (
     subject          TEXT    NOT NULL,
     duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes >= 0),
     content          TEXT    NOT NULL DEFAULT '',
+    source           TEXT,
     created_at       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 )
@@ -171,6 +177,20 @@ class DatabaseManager:
         """把旧库逐版本升级到当前 schema。"""
         if from_version < 2:
             self._rebuild_study_records_v2()
+        if from_version < 3:
+            self._add_source_column_v3()
+
+    def _add_source_column_v3(self) -> None:
+        """v2 -> v3：给 study_records 增加 source 列。
+
+        ``ADD COLUMN`` 是原地操作，不重建表、不丢数据；老记录该列为 NULL，
+        语义上正好等于"手工录入"。重复执行前先查表结构，保证幂等。
+        """
+        conn = self.connection
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(study_records)")}
+        if "source" in columns:
+            return
+        conn.execute("ALTER TABLE study_records ADD COLUMN source TEXT")
 
     def _rebuild_study_records_v2(self) -> None:
         """v1 -> v2：把 study_date 的 CHECK 从"仅格式"升级为"真实日历日期"。

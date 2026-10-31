@@ -22,7 +22,12 @@ from core.database import DatabaseManager
 # 用于区分"未传该字段"与"显式传 None"（duration_minutes 允许清空）
 _UNSET: Any = object()
 
-_COLUMNS = "id, study_date, subject, duration_minutes, content, created_at, updated_at"
+_COLUMNS = (
+    "id, study_date, subject, duration_minutes, content, source, created_at, updated_at"
+)
+
+# 记录来源的合法取值；None 表示手工录入（含 v3 之前的历史记录）
+SOURCES: frozenset[str] = frozenset({"pomodoro", "stopwatch"})
 
 
 @dataclass(frozen=True)
@@ -36,6 +41,7 @@ class StudyRecord:
     content: str
     created_at: str            # 'YYYY-MM-DD HH:MM:SS'
     updated_at: str
+    source: str | None = None  # 'pomodoro' / 'stopwatch' / None=手工录入
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "StudyRecord":
@@ -49,6 +55,7 @@ class StudyRecord:
             content=str(row["content"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            source=None if row["source"] is None else str(row["source"]),
         )
 
 
@@ -99,6 +106,20 @@ def _check_subject(value: str) -> str:
     return text
 
 
+def _check_source(value: str | None) -> str | None:
+    """校验来源标记；空串按"未标注"处理，其余必须是已知来源。"""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"source 必须是字符串或 None，收到 {type(value).__name__}")
+    text = value.strip()
+    if not text:
+        return None
+    if text not in SOURCES:
+        raise ValueError(f"未知的记录来源: {value!r}，可选 {sorted(SOURCES)}")
+    return text
+
+
 class StudyRecordRepository:
     """``study_records`` 表的增删改查。"""
 
@@ -117,17 +138,19 @@ class StudyRecordRepository:
         subject: str,
         content: str = "",
         duration_minutes: int | None = None,
+        source: str | None = None,
     ) -> int:
         """新增一条记录并返回其 id。同一天可重复调用，产生多条记录。"""
         now = _now()
         cursor = self._conn.execute(
             "INSERT INTO study_records (study_date, subject, duration_minutes, "
-            "content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "content, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 normalize_date(study_date),
                 _check_subject(subject),
                 _check_duration(duration_minutes),
                 content,
+                _check_source(source),
                 now,
                 now,
             ),
@@ -175,6 +198,25 @@ class StudyRecordRepository:
             (limit,),
         ).fetchall()
         return [StudyRecord.from_row(r) for r in rows]
+
+    def list_subjects(self) -> list[str]:
+        """出现过的全部科目，按使用次数从多到少排序。
+
+        左侧的科目标签页用它生成：不写死科目清单，新增一个科目就自动多一个标签。
+        """
+        rows = self._conn.execute(
+            "SELECT subject, COUNT(*) AS n FROM study_records "
+            "GROUP BY subject ORDER BY n DESC, subject ASC"
+        ).fetchall()
+        return [str(r["subject"]) for r in rows]
+
+    def list_dates(self) -> list[str]:
+        """有记录的日期（去重，倒序）；用于计算连续打卡天数。"""
+        rows = self._conn.execute(
+            "SELECT DISTINCT study_date FROM study_records "
+            "ORDER BY study_date DESC"
+        ).fetchall()
+        return [str(r["study_date"]) for r in rows]
 
     def count(self, study_date: str | date | datetime | None = None) -> int:
         """记录总数；给定日期时只统计当天。"""

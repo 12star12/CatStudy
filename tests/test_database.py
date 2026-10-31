@@ -40,6 +40,7 @@ EXPECTED_COLUMNS = [
     ("subject", "TEXT", 1, 0),
     ("duration_minutes", "INTEGER", 0, 0),
     ("content", "TEXT", 1, 0),
+    ("source", "TEXT", 0, 0),                    # v3 新增：记录来源，可为空
     ("created_at", "TEXT", 1, 0),
     ("updated_at", "TEXT", 1, 0),
 ]
