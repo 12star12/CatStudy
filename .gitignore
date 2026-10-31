@@ -5,13 +5,17 @@ env/
 ENV/
 
 # ===== 本地数据库 Local SQLite databases =====
-# 保留 data/ 目录结构，但忽略其中的数据库文件
+# 保留 data/ 目录结构，但忽略其中的数据库文件；表结构与初始化代码照常入库
 data/*.db
 data/*.sqlite
 data/*.sqlite3
 *.db
 *.sqlite
 *.sqlite3
+# WAL 模式产生的事务日志与共享内存文件
+*.db-wal
+*.db-shm
+*.db-journal
 
 # ===== Python 字节码与缓存 Bytecode & caches =====
 __pycache__/
