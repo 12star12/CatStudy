@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import (
     QContextMenuEvent,
@@ -28,6 +30,10 @@ from ui.sprite import (
     possible_offsets,
 )
 
+# 默认角色素材：第一只正式角色（单帧 sit，39x48 网格 @2x = 78x96 显示）
+# 旧的 idle.json（16x16 @8x 眨眼动画）与其余旧素材均原样保留，切换只需改这一行。
+DEFAULT_SPRITE_PATH: Path = CAT_ASSETS_DIR / "cat_sit.json"
+
 
 def _max_down_offset() -> int:
     """呼吸下沉的最大像素量，用于给窗口预留垂直余量。"""
@@ -43,7 +49,7 @@ class PetWindow(QWidget):
 
         # 动画相关对象；窗口只消费帧信号，不关心时间轴细节
         self._sprite = SpriteSheet(
-            sprite_path if sprite_path is not None else CAT_ASSETS_DIR / "idle.json"
+            sprite_path if sprite_path is not None else DEFAULT_SPRITE_PATH
         )
         self._dpr: float = float(self.devicePixelRatioF())
         self._player = AnimationPlayer(self._sprite, parent=self, dpr=self._dpr)

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import tempfile
@@ -353,7 +354,7 @@ class NearestNeighbourRenderTest(unittest.TestCase):
         cols, rows = self.sprite.grid_size
         for dpr in (1.0, 1.25, 1.5, 2.0):
             cell = self.sprite.device_cell(dpr)
-            self.assertEqual(cell, round(self.sprite.cell_pixels * dpr))
+            self.assertEqual(cell, math.floor(self.sprite.cell_pixels * dpr + 0.5))
             pm = self.sprite.pixmap("open", dpr)
             self.assertEqual(pm.width(), cols * cell)
             self.assertEqual(pm.height(), rows * cell)

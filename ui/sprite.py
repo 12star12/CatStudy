@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,8 +163,13 @@ class SpriteSheet:
         return tuple(self._patterns)
 
     def device_cell(self, dpr: float = 1.0) -> int:
-        """每格在物理设备上占多少像素（取整，保证块边缘锐利）。"""
-        return max(1, int(round(self.cell_pixels * float(dpr))))
+        """每格在物理设备上占多少像素（取整，保证块边缘锐利）。
+
+        采用四舍五入（half-up）而非 Python 内置 ``round`` 的银行家舍入：
+        ``round(2 * 1.25) == 2`` 会让 ``cell_pixels=2`` 的素材在 125% 缩放下
+        整体缩小 20%；half-up 取 3 则偏向略放大，视觉上比缩小更可接受。
+        """
+        return max(1, math.floor(self.cell_pixels * float(dpr) + 0.5))
 
     def frame_size(self, dpr: float = 1.0) -> tuple[int, int]:
         """单帧的逻辑像素尺寸（宽, 高），供窗口布局使用。"""
