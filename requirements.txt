@@ -1,0 +1,5 @@
+# CatStudy 运行依赖
+# 说明：sqlite3 是 Python 标准库，无需单独安装；Git 为版本控制工具，不属于 pip 依赖。
+# 版本下限对应当前 .venv 中已验证可用的版本。
+PySide6>=6.12.0
+Pillow>=13.0.0

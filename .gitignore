@@ -1,0 +1,32 @@
+# ===== 虚拟环境 Virtual environments =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== 本地数据库 Local SQLite databases =====
+# 保留 data/ 目录结构，但忽略其中的数据库文件
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== Python 字节码与缓存 Bytecode & caches =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ===== 打包产物 Build artifacts =====
+build/
+dist/
+*.spec
+
+# ===== 编辑器与系统文件 IDE / OS =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

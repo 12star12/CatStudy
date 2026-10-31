@@ -1,0 +1,42 @@
+{
+  "state": "sit_preview",
+  "cell_pixels": 8,
+  "palette": {
+    "O": "#F2A65A",
+    "S": "#D98236",
+    "W": "#FFF6EC",
+    "E": "#4A3527",
+    "P": "#F4A7B9"
+  },
+  "frames": {
+    "sit": [
+      ".......OO..........OO.......",
+      "......OOOO........OOOO......",
+      ".....OPOOO........OOOPO.....",
+      ".....OOOOOO......OOOOOO.....",
+      "....OOOOOOOO....OOOOOOOO....",
+      "...OOOOOOOOOOOOOOOOOOOOOO...",
+      "...OOOOOOOOOOOOOOOOOOOOOO...",
+      "...OOOOOOSSOOOOOOSSOOOOOO...",
+      "...OOOOEEOOOOOOOOOOEEOOOO...",
+      "...OOWWWWWWWWWWWWWWWWWWOO...",
+      "...OOWWWWWWWWPPWWWWWWWWOO...",
+      "....OOWWWWWWWWWWWWWWWWOO....",
+      "....OOOOWWWWWWWWWWWWOOOOOO..",
+      "...OOOOOOWWWWWWWWWWOOOOOOOO.",
+      "...OOSOOOWWWWWWWWWWOOOSOO.OO",
+      "...OOOOOOWWWWWWWWWWOOOOOO.OO",
+      "...OOOOOOWWWWWWWWWWOOOOOO.OO",
+      "...OOOOOOWWWWWWWWWWOOOOOO.OO",
+      "...OOOOOOWWWWWWWWWWOOOOOO.OO",
+      "....OOOOOOWWWWWWWWOOOOOO..OO",
+      ".....OOOOOOWWWWWWOOOOOO..OOO",
+      "...OWWOOOOWWWWWWWWOOOOWWOOOO",
+      "...OWWWOOOWWWWWWWWOOOWWWOOO.",
+      "....WWWOOOWWWWWWWWOOOWWW....",
+      ".....WWWOOWWWWWWWWOOWWW.....",
+      "......WWWOWWWWWWWWOWWW......",
+      "..........WWWWWWWW.........."
+    ]
+  }
+}

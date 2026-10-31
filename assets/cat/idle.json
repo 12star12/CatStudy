@@ -1,0 +1,67 @@
+{
+  "state": "idle",
+  "cell_pixels": 8,
+  "palette": {
+    "O": "#F2A65A",
+    "S": "#D98236",
+    "W": "#FFF6EC",
+    "E": "#4A3527",
+    "P": "#F4A7B9"
+  },
+  "frames": {
+    "open": [
+      ".OO..........OO.",
+      "OOOO........OOOO",
+      "OPOOO......OOOPO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OSOOSSOOOOSSOOSO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOEEOOOOOOEEOOO",
+      "OOOEEEOOOOEEEOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OWWWWWWWWWWWWWWO",
+      "OWWWWWWPPWWWWWWO",
+      ".WWWWWWWWWWWWWW.",
+      "..WWWWWWWWWWWW..",
+      "...WWWWWWWWWW...",
+      "....WWWWWWWW...."
+    ],
+    "half": [
+      ".OO..........OO.",
+      "OOOO........OOOO",
+      "OPOOO......OOOPO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OSOOSSOOOOSSOOSO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOEEEOOOOEEEOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OWWWWWWWWWWWWWWO",
+      "OWWWWWWPPWWWWWWO",
+      ".WWWWWWWWWWWWWW.",
+      "..WWWWWWWWWWWW..",
+      "...WWWWWWWWWW...",
+      "....WWWWWWWW...."
+    ],
+    "closed": [
+      ".OO..........OO.",
+      "OOOO........OOOO",
+      "OPOOO......OOOPO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OSOOSSOOOOSSOOSO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OOOEEOOOOOOEEOOO",
+      "OOOOOOOOOOOOOOOO",
+      "OWWWWWWWWWWWWWWO",
+      "OWWWWWWPPWWWWWWO",
+      ".WWWWWWWWWWWWWW.",
+      "..WWWWWWWWWWWW..",
+      "...WWWWWWWWWW...",
+      "....WWWWWWWW...."
+    ]
+  }
+}
