@@ -1,6 +1,10 @@
 {
   "state": "idle",
   "cell_pixels": 8,
+  "roles": {
+    "base": "open",
+    "blink": ["half", "closed", "closed", "half"]
+  },
   "palette": {
     "O": "#F2A65A",
     "S": "#D98236",
