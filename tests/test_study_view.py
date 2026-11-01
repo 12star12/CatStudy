@@ -426,7 +426,8 @@ class MainWindowTest(_ViewCase):
         window = MainWindow(self.repo)
         self.addCleanup(window.deleteLater)
         self.assertEqual(window.windowTitle(), "CatStudy · 学习记录")
-        self.assertIs(window.centralWidget(), window.view)
+        # 中央控件现在是「切换按钮 + 页面栈」的容器，不是单个视图
+        self.assertIn(window.view, window.stack.findChildren(type(window.view)))
         self.assertGreaterEqual(window.minimumWidth(), 640)
 
     def test_show_event_refreshes(self) -> None:

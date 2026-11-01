@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Iterable
 
 from core.study_records import StudyRecord
@@ -91,3 +92,44 @@ def flatten_content(content: str, limit: int | None = None) -> str:
     if limit is not None and len(text) > limit:
         return text[:limit].rstrip() + "…"
     return text
+
+
+def format_money(cents: int) -> str:
+    """把"分"格式化成 ``¥12.50``；负数（将来做收支时）带负号。"""
+    if isinstance(cents, bool) or not isinstance(cents, int):
+        raise TypeError(f"金额必须是整数分，收到 {type(cents).__name__}")
+    sign = "-" if cents < 0 else ""
+    yuan, rest = divmod(abs(cents), 100)
+    return f"{sign}¥{yuan:,}.{rest:02d}"
+
+
+def format_money_plain(cents: int) -> str:
+    """不带货币符号的金额，用于输入框回填。"""
+    if isinstance(cents, bool) or not isinstance(cents, int):
+        raise TypeError(f"金额必须是整数分，收到 {type(cents).__name__}")
+    sign = "-" if cents < 0 else ""
+    yuan, rest = divmod(abs(cents), 100)
+    return f"{sign}{yuan}.{rest:02d}"
+
+
+def parse_money(text: str) -> int:
+    """把用户输入的金额解析成整数分。
+
+    容忍 ``12``、``12.5``、``￥12.50``、``12.505``（多余位数四舍五入到分），
+    但拒绝空串、负数、非数字。抛 ``ValueError`` 由调用方就地提示。
+    """
+    if not isinstance(text, str):
+        raise TypeError("金额输入必须是字符串")
+    cleaned = text.strip().replace("￥", "").replace("¥", "").replace(",", "")
+    if not cleaned:
+        raise ValueError("金额不能为空")
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation as exc:
+        raise ValueError(f"金额格式不对: {text!r}") from exc
+    if value <= 0:
+        raise ValueError("金额必须大于 0")
+    if value > Decimal("9999999"):
+        raise ValueError("金额过大")
+    # 四舍五入到分，避免 0.005 这类输入被截断
+    return int((value * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

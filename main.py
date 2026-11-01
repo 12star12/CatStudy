@@ -20,6 +20,7 @@ from datetime import date
 from PySide6.QtWidgets import QApplication
 
 from core.database import init_database
+from core.expenses import ExpenseRepository
 from core.study_records import StudyRecordRepository
 from ui.main_window import StudyWindowManager
 from ui.pet_window import PetWindow
@@ -74,7 +75,7 @@ def main() -> int:
         configure_application(app)
 
         repository = StudyRecordRepository(db)
-        manager = StudyWindowManager(repository)
+        manager = StudyWindowManager(repository, ExpenseRepository(db))
 
         pet = PetWindow(default_subject=last_subject(repository))
         pet.studyRecordsRequested.connect(manager.open)

@@ -267,6 +267,24 @@ QPushButton#subjectTab:checked {{
     font-weight: 600;
 }}
 
+/* 顶部「学习记录 / 账本」切换：两个互斥胶囊，浮在暖粉底上 */
+QPushButton#viewTab {{
+    background-color: {Palette.PAPER};
+    border: 1px solid {Palette.NOTEBOOK_BORDER};
+    border-radius: 16px;
+    padding: 6px 18px;
+    color: {Palette.INK};
+}}
+QPushButton#viewTab:hover {{
+    border-color: {Palette.ROSE};
+}}
+QPushButton#viewTab:checked {{
+    background-color: {Palette.TAB_PINK};
+    border-color: #D9A8AA;
+    color: {Palette.INK_STRONG};
+    font-weight: 600;
+}}
+
 QFrame#paperPanel {{
     background-color: {Palette.PAPER_DEEP};
     border: 1px solid {Palette.NOTEBOOK_BORDER};

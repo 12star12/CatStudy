@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from core.database import DatabaseManager
+from core.database import SCHEMA_VERSION, DatabaseManager
 from core.study_records import StudyRecordRepository
 from core.timer import FocusTimer, TimerMode, TimerState, format_clock
 from main import FALLBACK_SUBJECT, last_subject, save_focus_session
@@ -247,7 +247,7 @@ class SourceColumnTests(unittest.TestCase):
         self.addCleanup(db.close)
         columns = {row["name"] for row in db.connection.execute("PRAGMA table_info(study_records)")}
         self.assertIn("source", columns)
-        self.assertEqual(db.schema_version(), 3)
+        self.assertEqual(db.schema_version(), SCHEMA_VERSION)
 
     def test_migration_from_v2_keeps_rows(self):
         # 先造一个 v2 结构的库（没有 source 列）
@@ -265,7 +265,7 @@ class SourceColumnTests(unittest.TestCase):
         db2 = DatabaseManager(self.path)
         db2.connect()
         self.addCleanup(db2.close)
-        self.assertEqual(db2.schema_version(), 3)
+        self.assertEqual(db2.schema_version(), SCHEMA_VERSION)
         row = db2.connection.execute(
             "SELECT subject, source FROM study_records"
         ).fetchone()

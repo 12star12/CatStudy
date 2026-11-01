@@ -26,7 +26,8 @@ DB_PATH: Path = DATA_DIR / "catstudy.db"
 # 当前 schema 版本；未来改表结构时递增，并在 _migrate 中补对应步骤
 # v1 -> v2：study_date 的 CHECK 由"仅格式正则"改为"格式 + 真实日历日期"
 # v2 -> v3：新增 source 列，标记记录来源（番茄钟 / 正计时 / 手工录入）
-SCHEMA_VERSION: int = 3
+# v3 -> v4：新增 expenses 表（记账）
+SCHEMA_VERSION: int = 4
 
 # ---------- 表结构 ----------
 
@@ -72,18 +73,37 @@ CREATE TABLE IF NOT EXISTS study_records (
 )
 """
 
+# 记账表：只记支出，金额用整数分存储
+# - amount_cents 用"分"而不是浮点元：0.1+0.2 != 0.3 这类误差在账本里不可接受
+# - 不建外键/不做分类表：分类就是一段文本，允许自由输入，避免为几个选项建表
+_TABLE_EXPENSES = """
+CREATE TABLE IF NOT EXISTS expenses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_date TEXT    NOT NULL
+                 CHECK (expense_date IS date(expense_date)),
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    category     TEXT    NOT NULL,
+    note         TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+)
+"""
+
 # 索引：按日期筛选是最高频查询；按科目统计次之
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_study_records_study_date "
     "ON study_records (study_date)",
     "CREATE INDEX IF NOT EXISTS idx_study_records_subject "
     "ON study_records (subject)",
+    "CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (expense_date)",
+    "CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses (category)",
 )
 
 # 建表 + 建索引，顺序执行即为完整初始化
 SCHEMA_STATEMENTS: tuple[str, ...] = (
     _TABLE_APP_META,
     _TABLE_STUDY_RECORDS,
+    _TABLE_EXPENSES,
     *_INDEXES,
 )
 
@@ -179,6 +199,9 @@ class DatabaseManager:
             self._rebuild_study_records_v2()
         if from_version < 3:
             self._add_source_column_v3()
+        if from_version < 4:
+            # 建表语句本身是 CREATE TABLE IF NOT EXISTS，直接执行即可
+            self.connection.execute(_TABLE_EXPENSES)
 
     def _add_source_column_v3(self) -> None:
         """v2 -> v3：给 study_records 增加 source 列。
