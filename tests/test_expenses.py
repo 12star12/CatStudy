@@ -7,14 +7,29 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
+from core.accounts import ASSET, LIABILITY, AccountRepository
 from core.database import DatabaseManager
-from core.expenses import ExpenseRepository
+from core.expenses import (
+    FLOW_EXPENSE,
+    FLOW_INCOME,
+    ExpenseRepository,
+    flow_delta,
+    presets_for,
+)
 from core.study_records import StudyRecordRepository
+from ui.expense_dialog import ExpenseDialog
 from ui.expense_view import CATEGORY_TAB_ALL, ExpenseView
-from ui.formatting import format_money, format_money_plain, parse_money
+from ui.formatting import (
+    balance_ratio,
+    format_balance_hint,
+    format_money,
+    format_money_plain,
+    parse_money,
+)
 from ui.main_window import MainWindow
+from ui.theme import Palette
 
 _APP: QApplication | None = None
 
@@ -51,9 +66,76 @@ class MoneyFormatTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=text):
                 parse_money(text)
 
+    def test_parse_arithmetic(self):
+        self.assertEqual(parse_money("6.9+2.49"), 939)
+        self.assertEqual(parse_money("3*4"), 1200)
+        self.assertEqual(parse_money("(12+8)/2"), 1000)
+        self.assertEqual(parse_money("10-2.5"), 750)
+        # 中文输入法下的全角符号也要能算
+        self.assertEqual(parse_money("6.9＋2.49"), 939)
+        self.assertEqual(parse_money("10－2"), 800)
+
+    def test_parse_rejects_unsafe_expression(self):
+        # 只允许四则运算，幂/函数/属性访问一律拒绝
+        for text in ("2**10", "abs(-1)", "1 if 1 else 2", "__import__('os')"):
+            with self.assertRaises(ValueError, msg=text):
+                parse_money(text)
+
+    def test_parse_rejects_division_by_zero(self):
+        with self.assertRaises(ValueError):
+            parse_money("1/0")
+
     def test_format_rejects_float(self):
         with self.assertRaises(TypeError):
             format_money(12.5)
+
+
+class BalanceHintTests(unittest.TestCase):
+    """结余评语：先保住记账意愿，再引导创收。"""
+
+    def test_empty_month_has_no_comment(self):
+        self.assertEqual(format_balance_hint(0, 0), "")
+
+    def test_missing_income_blames_data_not_user(self):
+        hint = format_balance_hint(0, 1839)
+        self.assertIn("收入", hint)
+
+    def test_missing_expense(self):
+        self.assertIn("花销", format_balance_hint(800000, 0))
+
+    def test_negative_balance_states_gap_without_judging(self):
+        hint = format_balance_hint(1000, 2839)
+        self.assertIn("还差", hint)
+        self.assertIn("¥18.39", hint)
+        # 省钱和多赚两条路都要给：只说省，用户会觉得永远在被限制
+        self.assertIn("省", hint)
+        self.assertIn("赚", hint)
+
+    def test_break_even(self):
+        self.assertIn("打平", format_balance_hint(5000, 5000))
+
+    def test_praise_scales_with_ratio(self):
+        self.assertIn("一半以上", format_balance_hint(10000, 4000))  # 60%
+        self.assertIn("有结余", format_balance_hint(10000, 7000))    # 30%
+        self.assertIn("结余不多", format_balance_hint(10000, 9500))  # 5%
+
+    def test_no_hint_is_blaming(self):
+        """所有分支都不得出现指责性措辞。"""
+        banned = ("花得比赚得多", "超支", "警告", "太多了", "省着点")
+        cases = (
+            (0, 0), (0, 100), (100, 0), (100, 200), (100, 100),
+            (1000, 100), (1000, 900), (1000, 999), (1000, 1001),
+        )
+        for income, expense in cases:
+            hint = format_balance_hint(income, expense)
+            for word in banned:
+                self.assertNotIn(word, hint, f"{income}/{expense} -> {hint}")
+
+    def test_ratio_edges(self):
+        self.assertEqual(balance_ratio(0, 100), 0.0, "收入为 0 时不能除零")
+        self.assertEqual(balance_ratio(100, 100), 0.0)
+        self.assertAlmostEqual(balance_ratio(100, 30), 0.7)
+        self.assertAlmostEqual(balance_ratio(100, 200), -1.0)
 
 
 class ExpenseRepositoryTests(unittest.TestCase):
@@ -142,7 +224,8 @@ class ExpenseViewTests(unittest.TestCase):
 
     def test_empty_month_shows_hint(self):
         self.assertFalse(self.view.empty_hint.isHidden())
-        self.assertEqual(self.view.total_label.text(), "¥0.00")
+        # 右卡大数字现在是「本月结余」= 收入 − 支出
+        self.assertEqual(self.view.balance_label.text(), "¥0.00")
 
     def test_rows_and_summary(self):
         self.repo.add("2026-11-01", 1250, "吃饭", "午饭")
@@ -150,8 +233,11 @@ class ExpenseViewTests(unittest.TestCase):
         self.view.refresh()
         self.assertEqual(self.view.table.rowCount(), 2)
         self.assertTrue(self.view.empty_hint.isHidden())
-        self.assertEqual(self.view.total_label.text(), "¥16.00")
-        self.assertEqual(self.view.table.item(0, 2).text(), "¥3.50")
+        self.assertEqual(self.view.balance_label.text(), "-¥16.00")  # 只有支出，结余为负
+        self.assertEqual(self.view.expense_label.text(), "¥16.00")
+        self.assertEqual(self.view.income_label.text(), "¥0.00")
+        # 日期倒序，第一行是 11-03 的 3.50；支出带负号以便和收入区分
+        self.assertEqual(self.view.table.item(0, 2).text(), "-¥3.50")
         self.assertIn("吃饭", self.view.detail_label.text())
 
     def test_category_filter(self):
@@ -196,6 +282,25 @@ class ExpenseViewTests(unittest.TestCase):
         self.view.table.selectRow(0)
         self.assertTrue(self.view.edit_button.isEnabled())
 
+    def test_negative_balance_is_not_painted_as_error(self):
+        """结余为负是常态（月初没发工资），不该用报错的红色。"""
+        self.repo.add("2026-11-01", 1250, "吃饭")
+        self.view.refresh()
+        self.assertNotIn(Palette.DANGER, self.view.balance_label.styleSheet())
+        self.assertIn(Palette.INK_STRONG, self.view.balance_label.styleSheet())
+
+    def test_hint_invites_recording_income(self):
+        """只记支出时，提示的是"收入没记"，不是"你花超了"。"""
+        self.repo.add("2026-11-01", 1250, "吃饭")
+        self.view.refresh()
+        self.assertIn("收入", self.view.balance_hint.text())
+
+    def test_hint_praises_when_saving(self):
+        self.repo.add("2026-11-01", 1250, "吃饭")
+        self.repo.add("2026-11-02", 800000, "工资", kind=FLOW_INCOME)
+        self.view.refresh()
+        self.assertIn("存下", self.view.balance_hint.text())
+
 
 class WindowSwitchTests(unittest.TestCase):
     def setUp(self):
@@ -226,6 +331,241 @@ class WindowSwitchTests(unittest.TestCase):
         self.assertEqual(plain.stack.count(), 1)
         plain.show_page(1)  # 越界请求应被忽略
         self.assertEqual(plain.stack.currentIndex(), 0)
+
+
+class FlowKindTests(unittest.TestCase):
+    """收支方向：汇总、分类、符号。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db = DatabaseManager(Path(self._tmp.name) / "t.db")
+        self.db.connect()
+        self.addCleanup(self.db.close)
+        self.repo = ExpenseRepository(self.db)
+
+    def test_default_is_expense(self):
+        expense = self.repo.get(self.repo.add("2026-11-01", 100))
+        self.assertEqual(expense.kind, FLOW_EXPENSE)
+        self.assertFalse(expense.is_income)
+        self.assertEqual(expense.signed_cents, -100)
+
+    def test_income_signed_cents(self):
+        expense = self.repo.get(
+            self.repo.add("2026-11-01", 8000, "兼职", kind=FLOW_INCOME)
+        )
+        self.assertTrue(expense.is_income)
+        self.assertEqual(expense.signed_cents, 8000)
+
+    def test_totals_separate_by_kind(self):
+        self.repo.add("2026-11-01", 1250, "吃饭")
+        self.repo.add("2026-11-02", 8000, "兼职", kind=FLOW_INCOME)
+        self.repo.add("2026-11-03", 500, "工资", kind=FLOW_INCOME)
+        self.assertEqual(self.repo.month_total_cents(2026, 11), 1250)
+        self.assertEqual(self.repo.month_income_cents(2026, 11), 8500)
+        self.assertEqual(self.repo.month_net_cents(2026, 11), 7250)
+
+    def test_net_can_be_negative(self):
+        self.repo.add("2026-11-01", 9000, "吃饭")
+        self.assertEqual(self.repo.month_net_cents(2026, 11), -9000)
+
+    def test_list_by_month_filters_kind(self):
+        self.repo.add("2026-11-01", 100, "吃饭")
+        self.repo.add("2026-11-02", 200, "兼职", kind=FLOW_INCOME)
+        self.assertEqual(len(self.repo.list_by_month(2026, 11)), 2)
+        self.assertEqual(
+            [e.category for e in self.repo.list_by_month(2026, 11, FLOW_INCOME)],
+            ["兼职"],
+        )
+        self.assertEqual(
+            [e.category for e in self.repo.list_by_month(2026, 11, FLOW_EXPENSE)],
+            ["吃饭"],
+        )
+
+    def test_category_totals_by_kind(self):
+        self.repo.add("2026-11-01", 100, "吃饭")
+        self.repo.add("2026-11-02", 300, "兼职", kind=FLOW_INCOME)
+        self.assertEqual(self.repo.category_totals(2026, 11), [("吃饭", 100)])
+        self.assertEqual(
+            self.repo.category_totals(2026, 11, FLOW_INCOME), [("兼职", 300)]
+        )
+
+    def test_list_categories_by_kind(self):
+        self.repo.add("2026-11-01", 100, "吃饭")
+        self.repo.add("2026-11-02", 300, "兼职", kind=FLOW_INCOME)
+        self.assertEqual(self.repo.list_categories(), ["吃饭"])
+        self.assertEqual(self.repo.list_categories(FLOW_INCOME), ["兼职"])
+
+    def test_presets_differ_by_kind(self):
+        self.assertIn("吃饭", presets_for(FLOW_EXPENSE))
+        self.assertNotIn("吃饭", presets_for(FLOW_INCOME))
+        self.assertIn("工资", presets_for(FLOW_INCOME))
+
+    def test_rejects_bad_kind(self):
+        with self.assertRaises(ValueError):
+            self.repo.add("2026-11-01", 100, kind="transfer")
+
+
+class AccountLinkTests(unittest.TestCase):
+    """流水与账户余额联动。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db = DatabaseManager(Path(self._tmp.name) / "t.db")
+        self.db.connect()
+        self.addCleanup(self.db.close)
+        self.accounts = AccountRepository(self.db)
+        self.repo = ExpenseRepository(self.db)
+        self.card = self.accounts.add("招行卡", ASSET, 100000, "银行卡")
+        self.credit = self.accounts.add("花呗", LIABILITY, 50000, "花呗")
+
+    def _balance(self, account_id):
+        account = self.accounts.get(account_id)
+        assert account is not None
+        return account.balance_cents
+
+    def test_flow_delta_matrix(self):
+        self.assertEqual(flow_delta(FLOW_EXPENSE, ASSET, 100), -100)
+        self.assertEqual(flow_delta(FLOW_EXPENSE, LIABILITY, 100), 100)
+        self.assertEqual(flow_delta(FLOW_INCOME, ASSET, 100), 100)
+        self.assertEqual(flow_delta(FLOW_INCOME, LIABILITY, 100), -100)
+
+    def test_expense_from_asset_reduces_balance(self):
+        self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.assertEqual(self._balance(self.card), 97000)
+
+    def test_income_to_asset_increases_balance(self):
+        self.repo.add(
+            "2026-11-01", 8000, "兼职", kind=FLOW_INCOME, account_id=self.card
+        )
+        self.assertEqual(self._balance(self.card), 108000)
+
+    def test_expense_on_liability_increases_debt(self):
+        self.repo.add("2026-11-01", 2000, "购物", account_id=self.credit)
+        self.assertEqual(self._balance(self.credit), 52000)
+
+    def test_income_on_liability_reduces_debt(self):
+        self.repo.add(
+            "2026-11-01", 20000, "其他", kind=FLOW_INCOME, account_id=self.credit
+        )
+        self.assertEqual(self._balance(self.credit), 30000)
+
+    def test_unlinked_keeps_balance(self):
+        self.repo.add("2026-11-01", 3000, "吃饭")
+        self.assertEqual(self._balance(self.card), 100000)
+        self.assertEqual(self._balance(self.credit), 50000)
+
+    def test_overdraft_allowed(self):
+        """余额不足时照常记账，账户变成负数——比拒绝记账更不烦人。"""
+        self.repo.add("2026-11-01", 150000, "买房", account_id=self.card)
+        self.assertEqual(self._balance(self.card), -50000)
+
+    def test_unknown_account_rejected(self):
+        with self.assertRaises(ValueError):
+            self.repo.add("2026-11-01", 100, account_id=9999)
+        self.assertEqual(self.repo.count(), 0, "校验失败不应留下流水")
+
+    def test_edit_amount_reapplies_difference(self):
+        expense_id = self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.repo.update(expense_id, amount_cents=5000)
+        self.assertEqual(self._balance(self.card), 95000)
+
+    def test_edit_moves_between_accounts(self):
+        expense_id = self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.repo.update(expense_id, account_id=self.credit)
+        self.assertEqual(self._balance(self.card), 100000, "旧账户要退回")
+        self.assertEqual(self._balance(self.credit), 53000, "新账户要扣掉")
+
+    def test_edit_to_unlinked_refunds(self):
+        expense_id = self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.repo.update(expense_id, account_id=None)
+        self.assertEqual(self._balance(self.card), 100000)
+        self.assertIsNone(self.repo.get(expense_id).account_id)
+
+    def test_delete_reverts_effect(self):
+        expense_id = self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.repo.delete(expense_id)
+        self.assertEqual(self._balance(self.card), 100000)
+
+    def test_deleting_account_keeps_rows(self):
+        self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        self.accounts.delete(self.card)
+        self.assertEqual(self.repo.count(), 1, "流水不该跟着账户消失")
+        self.assertIsNone(self.repo.get(1).account_id, "外键应被置 NULL")
+
+    def test_snapshot_refreshed_after_flow(self):
+        self.repo.add("2026-11-01", 3000, "吃饭", account_id=self.card)
+        latest = self.accounts.latest_snapshot()
+        assert latest is not None
+        # 资产 97000 + 负债 50000 → 净资产 47000
+        self.assertEqual(latest.net_cents, 47000)
+
+
+class ExpenseDialogTests(unittest.TestCase):
+    """对话框：方向切换、账户下拉、算式金额。"""
+
+    ACCOUNTS = ((1, "招行卡", ASSET), (2, "花呗", LIABILITY))
+
+    def _dialog(self, **kwargs):
+        kwargs.setdefault("accounts", self.ACCOUNTS)
+        dialog = ExpenseDialog(**kwargs)
+        self.addCleanup(dialog.deleteLater)
+        return dialog
+
+    def test_default_kind_is_expense(self):
+        dialog = self._dialog()
+        self.assertEqual(dialog.current_kind(), FLOW_EXPENSE)
+        self.assertTrue(dialog.expense_button.isChecked())
+
+    def test_switch_kind_changes_presets(self):
+        dialog = self._dialog()
+        dialog.set_kind(FLOW_INCOME)
+        self.assertEqual(dialog.current_kind(), FLOW_INCOME)
+        self.assertTrue(dialog.income_button.isChecked())
+        self.assertFalse(dialog.expense_button.isChecked())
+        items = [
+            dialog.category_combo.itemText(i)
+            for i in range(dialog.category_combo.count())
+        ]
+        self.assertIn("工资", items)
+        self.assertNotIn("吃饭", items)
+
+    def test_formula_amount_is_evaluated(self):
+        dialog = self._dialog()
+        dialog.amount_edit.setText("6.9+2.49")
+        dialog.category_combo.setCurrentText("吃饭")
+        self.assertEqual(dialog.values()["amount_cents"], 939)
+
+    def test_invalid_amount_blocks_accept(self):
+        dialog = self._dialog()
+        dialog.amount_edit.setText("abc")
+        dialog._on_accept()
+        self.assertTrue(dialog.error_label.isVisible() or dialog.error_label.text())
+        self.assertNotEqual(dialog.result(), QDialog.Accepted)
+
+    def test_account_combo_lists_accounts(self):
+        dialog = self._dialog()
+        self.assertEqual(dialog.account_combo.count(), 3)  # 不关联 + 两个账户
+        self.assertIsNone(dialog.selected_account())
+        dialog.account_combo.setCurrentIndex(1)
+        self.assertEqual(dialog.selected_account()[1], "招行卡")
+
+    def test_values_include_kind_and_account(self):
+        dialog = self._dialog()
+        dialog.amount_edit.setText("30")
+        dialog.set_kind(FLOW_INCOME)
+        dialog.account_combo.setCurrentIndex(2)  # 花呗
+        values = dialog.values()
+        self.assertEqual(values["kind"], FLOW_INCOME)
+        self.assertEqual(values["account_id"], 2)
+
+    def test_hint_mentions_selected_account(self):
+        dialog = self._dialog()
+        dialog.amount_edit.setText("9.39")
+        dialog.account_combo.setCurrentIndex(1)
+        self.assertIn("招行卡", dialog.hint_label.text())
+        self.assertIn("9.39", dialog.hint_label.text())
 
 
 if __name__ == "__main__":

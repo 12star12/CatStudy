@@ -61,6 +61,7 @@ class Palette:
     TAB_PINK = "#E3BCBD"      # 选中的科目标签
     TAB_YELLOW = "#FEE4A7"    # 未选中的科目标签（保留参考图的黄）
     ROSE = "#D4537E"          # 玫红强调：今天、有记录的日期
+    INCOME = "#3F7A57"        # 收入金额（墨绿）。支出的金额保持深棕，不用红色避免满屏报警
     ROSE_SOFT = "#F5C3D0"
     BROWN_BUTTON = "#946746"  # 主按钮棕
     BROWN_BUTTON_HOVER = "#A87954"
@@ -222,6 +223,43 @@ QCalendarWidget QHeaderView::section {{
     padding: 4px;
 }}
 
+/* ---------------- 滚动条 ----------------
+   不写这一段，Windows 会画一条深色原生滚动条，在奶油纸上像一道裂口。
+   轨道透明、手柄用浅赭色，悬停才加深；宽度收到 10px，箭头按钮直接去掉。 */
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {Palette.BORDER};
+    border-radius: 5px;
+    min-height: 36px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background-color: {Palette.INK_MUTED};
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {Palette.BORDER};
+    border-radius: 5px;
+    min-width: 36px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {Palette.INK_MUTED};
+}}
+QScrollBar::add-line, QScrollBar::sub-line {{
+    width: 0;
+    height: 0;
+}}
+QScrollBar::add-page, QScrollBar::sub-page {{
+    background: transparent;
+}}
+
 QLineEdit, QComboBox, QSpinBox, QDateEdit, QPlainTextEdit {{
     background-color: {Palette.SURFACE};
     border: 1px solid {Palette.BORDER};
@@ -302,6 +340,42 @@ QFrame#divider {{
     border: none;
     max-height: 1px;
     min-height: 1px;
+}}
+
+/* ---------------- 日记页 ----------------
+   编辑器直接铺在纸面上，不加边框：这块是"写字的纸"，不是"填内容的框" */
+
+QListWidget#journalList {{
+    background-color: transparent;
+    border: none;
+    outline: none;
+}}
+QListWidget#journalList::item {{
+    border-radius: 10px;
+    padding: 6px 8px;
+    color: {Palette.INK};
+}}
+QListWidget#journalList::item:hover {{
+    background-color: {Palette.PAPER};
+}}
+QListWidget#journalList::item:selected {{
+    background-color: {Palette.HIGHLIGHT};
+    color: {Palette.INK_STRONG};
+}}
+
+QPlainTextEdit#journalEditor {{
+    background-color: transparent;
+    border: none;
+    padding: 2px 4px;
+    color: {Palette.INK};
+    font-size: 15px;
+    selection-background-color: {Palette.TAB_PINK};
+    selection-color: {Palette.INK_STRONG};
+}}
+
+QLabel#journalStatus {{
+    color: {Palette.INK_MUTED};
+    font-size: 12px;
 }}
 
 QLabel#dayTitleLabel {{
@@ -429,6 +503,15 @@ def apply_theme(app: "QApplication") -> None:
     绘制表头、日历星期行等部件，完全不理会样式表——实测日历星期行始终是系统灰
     ``#F5F5F5``，选中时还会冒出一块系统蓝。Fusion 是 Qt 自绘样式，QSS 能真正
     生效，颜色才由我们说了算。
+
+    **调用时机**：``QApplication`` 构造之后、任何窗口创建之前（见
+    ``main.configure_application``）。这套色板与 QSS 不会自动生效，漏调用的
+    表现是整窗白底灰边，而不是报错。
     """
     app.setStyle("Fusion")
+    # 设置样式表之后，app.style() 会被 Qt 包装成 QStyleSheetStyle，
+    # 再读 objectName / className 都拿不到真正的基样式。先把名字记下来，
+    # 方便测试断言与线上排查（"到底有没有切到 Fusion"）。
+    base_style = app.style().objectName() or app.style().metaObject().className()
     app.setStyleSheet(STYLESHEET)
+    app.setProperty("catstudyBaseStyle", base_style)

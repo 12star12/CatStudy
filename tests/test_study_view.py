@@ -425,7 +425,8 @@ class MainWindowTest(_ViewCase):
     def test_window_properties(self) -> None:
         window = MainWindow(self.repo)
         self.addCleanup(window.deleteLater)
-        self.assertEqual(window.windowTitle(), "CatStudy · 学习记录")
+        # 现在是一窗三页（学习记录 / 资产 / 流水），标题不再带"学习记录"
+        self.assertEqual(window.windowTitle(), "CatStudy")
         # 中央控件现在是「切换按钮 + 页面栈」的容器，不是单个视图
         self.assertIn(window.view, window.stack.findChildren(type(window.view)))
         self.assertGreaterEqual(window.minimumWidth(), 640)

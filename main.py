@@ -19,19 +19,32 @@ from datetime import date
 
 from PySide6.QtWidgets import QApplication
 
+from core.accounts import AccountRepository
 from core.database import init_database
 from core.expenses import ExpenseRepository
+from core.journal import JournalRepository
 from core.study_records import StudyRecordRepository
 from ui.main_window import StudyWindowManager
 from ui.pet_window import PetWindow
+from ui.theme import apply_theme
 
 # 科目输入框的默认值：还没有任何记录时用它
 FALLBACK_SUBJECT = "专注"
 
 
 def configure_application(app: QApplication) -> None:
-    """应用级设置：关窗即退出会连桌宠一起带走，这里显式关掉。"""
+    """应用级设置。
+
+    两件事都必须在这里做，而且要在任何窗口创建之前：
+
+    1. 关掉 ``quitOnLastWindowClosed``——桌宠是 ``Qt.Tool``，Qt 不把它算作
+       主窗口，不关掉会导致"关闭记录窗口时连猫一起退出"；
+    2. 加载主题。``ui/theme.py`` 里那套暖色色板与 QSS 不会自动生效，
+       漏了这一行界面就是 Qt 默认的白底灰边（曾经真实发生过：所有截图
+       脚本都手动调了 apply_theme，所以开发时看不出来）。
+    """
     app.setQuitOnLastWindowClosed(False)
+    apply_theme(app)
 
 
 def last_subject(repository: StudyRecordRepository) -> str:
@@ -75,7 +88,12 @@ def main() -> int:
         configure_application(app)
 
         repository = StudyRecordRepository(db)
-        manager = StudyWindowManager(repository, ExpenseRepository(db))
+        manager = StudyWindowManager(
+            repository,
+            ExpenseRepository(db),
+            AccountRepository(db),
+            JournalRepository(db),
+        )
 
         pet = PetWindow(default_subject=last_subject(repository))
         pet.studyRecordsRequested.connect(manager.open)

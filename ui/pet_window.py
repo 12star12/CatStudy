@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMenu, QWidget
 
 from core import autostart
 from core.timer import FocusTimer, TimerMode, TimerState
+from ui.focus_overlay import FocusOverlay
 from ui.sprite import (
     CAT_ASSETS_DIR,
     AnimationPlayer,
@@ -111,6 +112,13 @@ class PetWindow(QWidget):
         self._tick.setInterval(self.TICK_MS)
         self._tick.timeout.connect(self._on_tick)
 
+        # 全屏计时牌：惰性创建（只有真正用时才建窗口），创建后复用
+        self._overlay: FocusOverlay | None = None
+        # "我想要全屏"的偏好：与"当前是否可见"分开存。
+        # 按下 Esc 只是这一场不想看，不该顺手把偏好也取消掉——
+        # 否则下次还得重新勾一遍，这个开关就成了纯手动。
+        self._fullscreen_preferred: bool = False
+
         self._setup_window()
         self._setup_ui()
         self._setup_context_menu()
@@ -181,6 +189,15 @@ class PetWindow(QWidget):
         self.discard_action.triggered.connect(
             lambda _checked=False: self.discard_focus()
         )
+        self.focus_menu.addSeparator()
+        # 全屏计时牌：勾选=偏好（下次开始专注自动铺满桌面）。
+        # 单场收起用 Esc/点击，不影响这个勾选。
+        self.fullscreen_action = self.focus_menu.addAction("全屏计时")
+        self.fullscreen_action.setCheckable(True)
+        self.fullscreen_action.setToolTip(
+            "开始专注时自动铺满整个桌面显示剩余时间；" "按 Esc 只收起本次"
+        )
+        self.fullscreen_action.toggled.connect(self._toggle_fullscreen)
         # 菜单展开前按当前状态刷新可用性与文案（"暂停"↔"继续"）
         self._menu.aboutToShow.connect(self._sync_menu_state)
 
@@ -213,7 +230,39 @@ class PetWindow(QWidget):
         self.pause_action.setText(
             "继续" if self._timer.state is TimerState.PAUSED else "暂停"
         )
+        # 勾选回填的是"偏好"，不是"当前是否可见"：Esc 收起本次后，
+        # 开关仍应保持勾选，否则用户会以为偏好被自己弄丢了
+        self.fullscreen_action.blockSignals(True)
+        self.fullscreen_action.setChecked(self._fullscreen_preferred)
+        self.fullscreen_action.blockSignals(False)
         self._sync_autostart()
+
+    # ---------- 全屏计时牌 ----------
+
+    def _toggle_fullscreen(self, checked: bool) -> None:
+        """菜单勾选切换：勾上就立刻铺满，取消就收起。"""
+        self._fullscreen_preferred = bool(checked)
+        if checked and self._timer.is_active:
+            self._show_overlay()
+        elif not checked:
+            self._hide_overlay()
+
+    def _show_overlay(self) -> None:
+        """创建（首次）并显示全屏计时牌。"""
+        if self._overlay is None:
+            self._overlay = FocusOverlay(self._timer)
+        self._overlay.set_subject(self._subject)
+        self._overlay.show_fullscreen()
+
+    def _hide_overlay(self) -> None:
+        if self._overlay is not None:
+            self._overlay.dismiss()
+
+    @property
+    def overlay(self) -> FocusOverlay | None:
+        """当前全屏计时牌（未创建时为 None；测试用）。"""
+        return self._overlay
+
 
     # ---------- 开机自启动 ----------
 
@@ -264,6 +313,10 @@ class PetWindow(QWidget):
         self._bubble.set_text(self._timer.display_text())
         self._bubble.show_near(self)
         self._tick.start()
+        # 上次勾了全屏，这次自动铺满：这个偏好本来就是给"人不在电脑前"准备的，
+        # 每场都手动点一次就失去意义了
+        if self._fullscreen_preferred:
+            self._show_overlay()
         return True
 
     def toggle_pause(self) -> None:
@@ -290,6 +343,7 @@ class PetWindow(QWidget):
         self._tick.stop()
         self._player.set_walking(False)
         self._hide_bubble()
+        self._hide_overlay()
 
     def _ask_subject(self) -> str | None:
         """弹一次科目输入框；取消返回 None，留空则记"专注"。"""
@@ -378,6 +432,9 @@ class PetWindow(QWidget):
         super().hideEvent(event)
         self._player.stop()
         self._bubble.hide()
+        # 全屏牌子是独立顶层窗口，不会随本窗口一起消失；
+        # 猫都藏起来了还留一块全屏黑底，用户会以为程序卡死
+        self._hide_overlay()
 
     def moveEvent(self, event) -> None:  # noqa: N802 (Qt 命名风格)
         """拖动窗口时让计时气泡跟着走。

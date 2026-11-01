@@ -22,6 +22,7 @@ from core.study_records import StudyRecordRepository
 from main import configure_application
 from ui.main_window import MainWindow, StudyWindowManager
 from ui.pet_window import PetWindow
+from ui.theme import Palette
 
 _APP: QApplication | None = None
 
@@ -196,3 +197,27 @@ class ApplicationConfigTest(unittest.TestCase):
             app.quitOnLastWindowClosed(),
             "必须关掉，否则关闭记录窗口会连桌宠一起退出",
         )
+
+    def test_theme_is_applied_on_startup(self) -> None:
+        """启动必须应用主题。
+
+        这一条是补漏：``ui/theme.py`` 写好之后，``main.py`` 曾经忘了调用
+        ``apply_theme``，真机运行时界面是 Qt 默认的白底灰边，而所有截图脚本
+        都手动调了主题，导致开发时完全看不出来。
+        """
+        app = QApplication.instance() or QApplication([])
+        original_style = app.style().objectName()
+        original_qss = app.styleSheet()
+        self.addCleanup(app.setStyle, original_style)
+        self.addCleanup(app.setStyleSheet, original_qss)
+
+        app.setStyleSheet("")
+        configure_application(app)
+
+        self.assertTrue(app.styleSheet().strip(), "启动后必须有全局样式表")
+        self.assertEqual(
+            app.property("catstudyBaseStyle"),
+            "fusion",
+            "必须切到 Fusion，否则 Windows 原生样式会无视 QSS",
+        )
+        self.assertIn(Palette.NOTEBOOK_BG, app.styleSheet())

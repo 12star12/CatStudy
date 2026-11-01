@@ -27,7 +27,11 @@ DB_PATH: Path = DATA_DIR / "catstudy.db"
 # v1 -> v2：study_date 的 CHECK 由"仅格式正则"改为"格式 + 真实日历日期"
 # v2 -> v3：新增 source 列，标记记录来源（番茄钟 / 正计时 / 手工录入）
 # v3 -> v4：新增 expenses 表（记账）
-SCHEMA_VERSION: int = 4
+# v4 -> v5：新增 accounts（资产/负债账户）与 net_worth_snapshots（净资产快照）
+# v5 -> v6：流水加 kind（收入/支出）与 account_id（联动哪个账户）；
+#           accounts.balance_cents 放开负数（联动扣款可能透支）
+# v6 -> v7：新增 journal_entries（日记，一天一篇）
+SCHEMA_VERSION: int = 7
 
 # ---------- 表结构 ----------
 
@@ -73,9 +77,12 @@ CREATE TABLE IF NOT EXISTS study_records (
 )
 """
 
-# 记账表：只记支出，金额用整数分存储
+# 流水表：支出与收入共用一张表，靠 kind 区分
 # - amount_cents 用"分"而不是浮点元：0.1+0.2 != 0.3 这类误差在账本里不可接受
-# - 不建外键/不做分类表：分类就是一段文本，允许自由输入，避免为几个选项建表
+# - amount_cents 恒为正数，方向只由 kind 决定（存负数会让汇总公式到处取反）
+# - account_id 为 NULL = 这条流水不联动资产负债表，只记"花了/赚了多少"
+#   ON DELETE SET NULL：账户被删掉后流水保留，只是不再追溯影响
+# - 分类就是一段文本，允许自由输入，不为几个选项建表
 _TABLE_EXPENSES = """
 CREATE TABLE IF NOT EXISTS expenses (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +91,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
     category     TEXT    NOT NULL,
     note         TEXT    NOT NULL DEFAULT '',
+    kind         TEXT    NOT NULL DEFAULT 'expense'
+                 CHECK (kind IN ('expense', 'income')),
+    account_id   INTEGER REFERENCES accounts (id) ON DELETE SET NULL,
     created_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 )
@@ -99,12 +109,92 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses (category)",
 )
 
+# ---------- 资产 / 负债（v5） ----------
+#
+# 这是"存量"模型，和 expenses 的"发生额"模型不是一回事：
+# - expenses 记"今天花了 30 块"，是一件事；
+# - accounts 记"这张卡里现在有 8000 块"，是一个时点的状态。
+#
+# 因此余额只能手工维护（用户选的就是这个方式）。如果改成"每笔记增减自动累加"，
+# 一旦漏记一笔，余额就永久跑偏，而且没有对账入口——手工改余额本身就是对账。
+#
+# 金额仍用整数分。`kind` 决定符号：
+#   净资产 = Σ(asset) - Σ(liability)
+# v5 时余额强制 >= 0；v6 起放开了——流水联动扣款可能把账户扣成负数（透支），
+# 这时直接拒绝记账比让余额变负更烦人。负数在界面上用红色提示"对不上账"。
+_TABLE_ACCOUNTS = """
+CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    kind          TEXT    NOT NULL CHECK (kind IN ('asset', 'liability')),
+    balance_cents INTEGER NOT NULL DEFAULT 0,
+    category      TEXT    NOT NULL DEFAULT '',
+    note          TEXT    NOT NULL DEFAULT '',
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+)
+"""
+
+# 净资产快照：一天最多一条，靠 UNIQUE 约束 + UPSERT 覆盖。
+#
+# 为什么存"总资产/总负债"而不是只存净资产：净值是把两个数相减得到的，
+# 只存净值就永远无法区分"资产涨了 5 万"和"负债少了 5 万"，而这两件事
+# 的性质完全不同，以后要出报表也拿不回明细。
+_TABLE_NET_WORTH = """
+CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date           TEXT    NOT NULL UNIQUE
+                            CHECK (snapshot_date IS date(snapshot_date)),
+    total_assets_cents      INTEGER NOT NULL DEFAULT 0,
+    total_liabilities_cents INTEGER NOT NULL DEFAULT 0,
+    created_at              TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+)
+"""
+
+# 账户相关索引单独放：v1 -> v2 的整表重建会重跑 `_INDEXES`，
+# 那时 accounts 表可能还不存在，混在一起会报 "no such table"。
+_ACCOUNT_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_accounts_kind ON accounts (kind)",
+)
+
+# 日记：一天一篇，靠 UNIQUE(entry_date) 保证。
+#
+# 为什么不复用 study_records 的 content 字段：那张表一行 = 一段有科目的学习，
+# 一天可以有很多行，是"发生额"式的记录；日记是"这一天整体怎么样"，一天只有
+# 一份，且没有科目、时长这些维度。塞进同一张表会让两个概念互相污染：
+# 想查"今天学了多久"要把日记行排除，想查"今天的日记"要限定只有一个。
+#
+# content 允许空串：新建但还没写的时候就是空串，界面据此判断"这一天没内容"，
+# 仓储层则在保存空内容时直接删行（见 core/journal.py），列表里不会留空壳。
+_TABLE_JOURNAL = """
+CREATE TABLE IF NOT EXISTS journal_entries (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_date TEXT    NOT NULL UNIQUE
+               CHECK (entry_date IS date(entry_date)),
+    content    TEXT    NOT NULL DEFAULT '',
+    created_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+)
+"""
+
+# 日记按日期倒序翻页是最主要的读法，索引建在日期上
+_JOURNAL_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries (entry_date)",
+)
+
 # 建表 + 建索引，顺序执行即为完整初始化
 SCHEMA_STATEMENTS: tuple[str, ...] = (
     _TABLE_APP_META,
     _TABLE_STUDY_RECORDS,
+    # accounts 必须排在 expenses 前面：后者有 account_id 外键指向它
+    _TABLE_ACCOUNTS,
     _TABLE_EXPENSES,
+    _TABLE_NET_WORTH,
+    _TABLE_JOURNAL,
     *_INDEXES,
+    *_ACCOUNT_INDEXES,
+    *_JOURNAL_INDEXES,
 )
 
 
@@ -202,6 +292,19 @@ class DatabaseManager:
         if from_version < 4:
             # 建表语句本身是 CREATE TABLE IF NOT EXISTS，直接执行即可
             self.connection.execute(_TABLE_EXPENSES)
+        if from_version < 5:
+            self.connection.execute(_TABLE_ACCOUNTS)
+            self.connection.execute(_TABLE_NET_WORTH)
+            for statement in _ACCOUNT_INDEXES:
+                self.connection.execute(statement)
+        if from_version < 6:
+            self._rebuild_accounts_v6()
+            self._add_flow_columns_v6()
+        if from_version < 7:
+            # 建表语句自己是 IF NOT EXISTS，直接执行即可
+            self.connection.execute(_TABLE_JOURNAL)
+            for statement in _JOURNAL_INDEXES:
+                self.connection.execute(statement)
 
     def _add_source_column_v3(self) -> None:
         """v2 -> v3：给 study_records 增加 source 列。
@@ -214,6 +317,48 @@ class DatabaseManager:
         if "source" in columns:
             return
         conn.execute("ALTER TABLE study_records ADD COLUMN source TEXT")
+
+    def _add_flow_columns_v6(self) -> None:
+        """v5 -> v6：给 expenses 加 kind 与 account_id。
+
+        老流水全部按 'expense' 处理（当时只有支出），account_id 为 NULL
+        （当时没有联动），语义上正好。先查表结构，保证重复执行幂等。
+        """
+        conn = self.connection
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(expenses)")}
+        if "kind" not in columns:
+            conn.execute(
+                "ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense'"
+            )
+        if "account_id" not in columns:
+            # SQLite 的 ADD COLUMN 可以带 REFERENCES，默认值必须是 NULL
+            conn.execute("ALTER TABLE expenses ADD COLUMN account_id INTEGER "
+                         "REFERENCES accounts (id) ON DELETE SET NULL")
+
+    def _rebuild_accounts_v6(self) -> None:
+        """v5 -> v6：去掉 accounts.balance_cents 的 >= 0 约束。
+
+        SQLite 改不了既有 CHECK，只能重建。此时 expenses 还没有 account_id
+        列（它在下一步才加），所以不必担心外键指向被重命名的旧表。
+        """
+        conn = self.connection
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(accounts)")}
+        if not columns:
+            return
+
+        conn.execute("ALTER TABLE accounts RENAME TO accounts__v5")
+        conn.execute(_TABLE_ACCOUNTS)
+        conn.execute(
+            "INSERT INTO accounts "
+            "(id, name, kind, balance_cents, category, note, sort_order, "
+            " created_at, updated_at) "
+            "SELECT id, name, kind, balance_cents, category, note, sort_order, "
+            "       created_at, updated_at FROM accounts__v5"
+        )
+        conn.execute("DROP TABLE accounts__v5")
+        # 索引跟着旧表一起被删掉了，重建
+        for statement in _ACCOUNT_INDEXES:
+            conn.execute(statement)
 
     def _rebuild_study_records_v2(self) -> None:
         """v1 -> v2：把 study_date 的 CHECK 从"仅格式"升级为"真实日历日期"。

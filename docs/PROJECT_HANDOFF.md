@@ -1,6 +1,9 @@
 # CatStudy 项目交接文档（PROJECT_HANDOFF）
 
 > 最近更新：2026-10-31
+>
+> **本文档记录的是早期阶段（骨架 / 桌宠 / 素材），其中"SQLite 尚未启用"等描述已过时。**
+> 当前实现以 [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) 为准，那份是完整的重建级规格书。
 
 ## 一、项目定位与技术环境
 
