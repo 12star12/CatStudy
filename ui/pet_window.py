@@ -51,6 +51,11 @@ DOUBLE_CLICK_MAX_SHIFT: int = 6
 # 这一次双击只应打开一次窗口。
 REQUEST_DEDUPE_SECONDS: float = 0.35
 
+# "按下"状态的存活上限（秒）。触摸板轻触时 release 事件偶发丢失，
+# 若不复位，此后每一次按下都会被当成重复派发而丢弃，拖动与双击一起失灵。
+# 取 1.5 秒：远大于系统双击间隔（默认 0.5 秒），不会干扰正常双击。
+STALE_PRESS_SECONDS: float = 1.5
+
 
 def _max_down_offset() -> int:
     """呼吸下沉的最大像素量，用于给窗口预留垂直余量。"""
@@ -88,6 +93,7 @@ class PetWindow(QWidget):
         self._last_request_at: float | None = None
         # 同一次物理按下可能被派发两次（子标签与窗口各一次），用它去重
         self._left_pressed: bool = False
+        self._left_pressed_at: float = 0.0
 
         # 专注计时：计时器只管时间，科目与落库都不在这里
         self._timer = timer if timer is not None else FocusTimer()
@@ -472,13 +478,21 @@ class PetWindow(QWidget):
             super().mousePressEvent(event)
             return
 
+        now = time.monotonic()
+
         if self._left_pressed:
             # 一次物理按下偶尔会被派发两次（子标签 → 窗口），
-            # 不去重会把"按下一次"误判成"双击"，拖动时会莫名弹出窗口
-            return
+            # 不去重会把"按下一次"误判成"双击"，拖动时会莫名弹出窗口。
+            #
+            # 但如果距上次按下已经超过 STALE_PRESS_SECONDS 还停在"按下"状态，
+            # 说明上一次的 release 丢了（触摸板轻触时偶发）。这是陈旧状态，
+            # 必须复位，否则之后每一次按下都在这里被丢弃，拖动和双击会一起
+            # 永久失灵，只能重启应用。
+            if now - self._left_pressed_at < STALE_PRESS_SECONDS:
+                return
         self._left_pressed = True
+        self._left_pressed_at = now
 
-        now = time.monotonic()
         position = event.position().toPoint()
         is_double = (
             self._last_press_at is not None
