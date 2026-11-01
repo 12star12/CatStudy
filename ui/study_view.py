@@ -28,6 +28,7 @@ from PySide6.QtCore import QDate, QPoint, Qt
 from PySide6.QtGui import QColor, QPalette, QTextCharFormat
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QSizePolicy,
     QCalendarWidget,
     QDialog,
     QFrame,
@@ -271,7 +272,11 @@ class StudyRecordView(QWidget):
             QCalendarWidget.HorizontalHeaderFormat.NoHorizontalHeader
         )
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
-        self.calendar.setMinimumHeight(232)
+        # 纵向按内容高度：给 stretch 会让行距被撑得很稀，写死高度又会在月末
+        # 只剩 5 行时留一截空白，交给 sizeHint 最稳
+        # 高度取中间值：QCalendarWidget 的 sizeHint 只有 120px，6 行日期会挤在一起；
+        # 撑满整张卡片又会把行距拉得很稀。实测 200px 时一行约 29px，最舒服。
+        self.calendar.setFixedHeight(200)
         self._apply_weekday_formats()
 
         self._weekday_row = QWidget(card)
@@ -320,7 +325,8 @@ class StudyRecordView(QWidget):
 
         box.addLayout(nav)
         box.addWidget(self._weekday_row)
-        box.addWidget(self.calendar, 1)
+        box.addWidget(self.calendar)
+        box.addStretch(1)
         box.addWidget(divider)
         box.addLayout(stats)
         box.addWidget(self.today_button)

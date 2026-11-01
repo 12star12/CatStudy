@@ -30,6 +30,13 @@ CAT_ASSETS_DIR: Path = PROJECT_ROOT / "assets" / "cat"
 # 动画时间轴参数（单位：tick，每 tick 100ms）
 TICK_MS: int = 100
 BLINK_INTERVAL: int = 34  # 每 3.4 秒一次眨眼，避免过于频繁
+
+# 走路帧的播放间隔（毫秒）。源 GIF 是 120ms/帧，8 帧走完约 1 秒，
+# 与"小猫迈步"的手感相符；tick 是 100ms，所以按毫秒换算而不是按 tick 计数。
+WALK_FRAME_MS: int = 120
+
+# 空像素的写法："" 用点是历史习惯，合并/补齐画布时用空格更自然，两者都接受
+EMPTY_SYMBOLS: frozenset[str] = frozenset({".", " "})
 BREATH_CYCLE: int = 20  # 呼吸周期 2 秒
 BREATH_DOWN_MIN: int = 6  # 身体下沉（dy=1）的 tick 区间
 BREATH_DOWN_MAX: int = 13
@@ -45,10 +52,22 @@ class FrameRoles:
 
     base: str
     blink: tuple[str, ...] = ()
+    walk: tuple[str, ...] = ()
 
     @property
     def has_blink(self) -> bool:
         return bool(self.blink)
+
+    @property
+    def has_walk(self) -> bool:
+        return bool(self.walk)
+
+    def walk_frame(self, tick: int, frame_ms: int = WALK_FRAME_MS) -> str:
+        """返回指定 tick 的走路帧（按毫秒换算，循环播放）。"""
+        if not self.walk:
+            return self.base
+        elapsed = tick * TICK_MS
+        return self.walk[(elapsed // max(frame_ms, 1)) % len(self.walk)]
 
     def frame_at(self, tick: int, interval: int = BLINK_INTERVAL) -> str:
         """返回指定 tick 应显示的帧名（纯计算，不依赖事件循环）。"""
@@ -111,8 +130,9 @@ class SpriteSheet:
                 raise ValueError(f"帧 {name} 尺寸不一致，应为 {rows}x{cols}")
             for line in lines:
                 for symbol in line:
-                    if symbol != "." and symbol not in self._palette:
-                        raise ValueError(f"帧 {name} 含未定义颜色字符: {symbol}")
+                    if symbol in EMPTY_SYMBOLS or symbol in self._palette:
+                        continue
+                    raise ValueError(f"帧 {name} 含未定义颜色字符: {symbol!r}")
 
     def _resolve_roles(self, raw: object) -> FrameRoles:
         """从素材的 ``roles`` 字段解析帧角色；缺省时安全退化。
@@ -140,7 +160,18 @@ class SpriteSheet:
             raise ValueError(
                 f"roles.blink 含不存在的帧: {missing}，可选: {list(names)}"
             )
-        return FrameRoles(base=base, blink=blink)
+        walk_raw = raw.get("walk") or ()
+        if isinstance(walk_raw, str):
+            raise ValueError("roles.walk 必须是帧名数组，不能是单个字符串")
+        walk = tuple(str(n) for n in walk_raw)
+        missing = [n for n in walk if n not in self._patterns]
+        if missing:
+            raise ValueError(
+                f"roles.walk 含不存在的帧: {missing}，可选: {list(names)}"
+            )
+        if walk and len(walk) < 2:
+            raise ValueError("roles.walk 至少需要 2 帧才能形成循环")
+        return FrameRoles(base=base, blink=blink, walk=walk)
 
     # ---------- 基本信息 ----------
 
@@ -237,7 +268,7 @@ class SpriteSheet:
         for pattern in self._patterns.values():
             for y, line in enumerate(pattern):
                 for x, symbol in enumerate(line):
-                    if symbol != ".":
+                    if symbol not in EMPTY_SYMBOLS:
                         merged[y][x] = True
 
         runs: list[list[tuple[int, int]]] = []
@@ -305,6 +336,8 @@ class AnimationPlayer(QObject):
         self._blink_interval: int = int(blink_interval)
         self._dpr: float = float(dpr)
         self._tick_count: int = 0
+        # 是否处于"学习中"：走路循环。空闲时完全静止（不呼吸、不眨眼）
+        self._walking: bool = False
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._tick)
@@ -330,14 +363,33 @@ class AnimationPlayer(QObject):
     def tick(self) -> int:
         return self._tick_count
 
+    @property
+    def walking(self) -> bool:
+        return self._walking
+
+    def set_walking(self, walking: bool) -> None:
+        """切换"学习中走路 / 休息时静止"两种状态。
+
+        素材没有 walk 帧时退化为静止，不会抛错——旧素材（idle.json）依旧可用。
+        """
+        walking = bool(walking) and self._roles.has_walk
+        if walking == self._walking:
+            return
+        self._walking = walking
+        if self.is_running():
+            self._emit_current()
+
     # ---------- 时间轴（纯函数，便于测试） ----------
 
     def plan_at(self, tick: int) -> tuple[str, QPoint]:
-        """返回指定 tick 的帧名与绘制偏移。"""
-        return (
-            plan_frame(tick, self._roles, self._blink_interval),
-            plan_offset(tick),
-        )
+        """返回指定 tick 的帧名与绘制偏移。
+
+        偏移恒为 (0, 0)：走路靠换帧表达，静止时不做呼吸起伏。
+        旧版本用 1px 上下游移做"呼吸"，视觉上像在抖，用户明确要求休息时静止。
+        """
+        if self._walking and self._roles.has_walk:
+            return self._roles.walk_frame(tick), QPoint(0, 0)
+        return plan_frame(tick, self._roles, self._blink_interval), QPoint(0, 0)
 
     # ---------- 生命周期 ----------
 

@@ -46,11 +46,13 @@ class Palette:
     # ---- 笔记本风（学习记录窗口改版）----
     # 取自参考图的实测色值：窗口底 #FDE5CB、纸面 #FFF6DE、卡片 #FBF0DC
     NOTEBOOK_BG = "#FDE5CB"
-    PAPER = "#FFF6DE"
-    PAPER_DEEP = "#FFEEC3"
-    PAPER_CARD = "#FBF0DC"
-    NOTEBOOK_BORDER = "#E8CDAA"
-    RULE = "#EBD3B4"          # 纸面横线/分隔线
+    # 用户要求"日历要奶油配色"：纸面整体提亮到近奶白，只留很淡的米黄，
+    # 靠玫瑰粉点缀撑住层次，否则整窗会发土。
+    PAPER = "#FFFBF1"
+    PAPER_DEEP = "#FFF4DE"
+    PAPER_CARD = "#FFFCF6"
+    NOTEBOOK_BORDER = "#EBD8C0"
+    RULE = "#EFE1CC"          # 纸面横线/分隔线
 
     INK = "#7A5240"           # 纸上正文
     INK_STRONG = "#5C3B26"    # 标题

@@ -237,13 +237,15 @@ class CharacterSitWindowTest(unittest.TestCase):
     """真实 PetWindow 构建（默认素材路径应为新角色）。"""
 
     def test_default_sprite_path(self) -> None:
-        self.assertEqual(DEFAULT_SPRITE_PATH.name, "cat_sit.json")
+        self.assertEqual(DEFAULT_SPRITE_PATH.name, "cat_study.json")
 
     def test_window_builds_with_default_sprite(self) -> None:
         window = PetWindow()
         try:
             sprite = window._sprite
-            self.assertEqual(sprite.frame_names(), ("sit",))
+            # 默认素材现在含 1 帧坐姿 + 8 帧走路
+            self.assertEqual(len(sprite.frame_names()), 9)
+            self.assertIn("sit", sprite.frame_names())
             w, h = sprite.frame_size(window._dpr)
             self.assertEqual((w, h), DISPLAY)
             self.assertEqual(window.width(), DISPLAY[0])
@@ -368,6 +370,7 @@ class LegacyAssetsIntactTest(unittest.TestCase):
 
     def test_legacy_character_sit_still_loads(self) -> None:
         sprite = SpriteSheet(LEGACY_JSON)
+        # 旧素材仍是单帧，保留它是为了随时能切回去
         self.assertEqual(sprite.frame_names(), ("sit",))
         self.assertFalse(sprite.pixmap("sit").isNull())
 

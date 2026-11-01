@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMenu, QWidget
 
+from core import autostart
 from core.timer import FocusTimer, TimerMode, TimerState
 from ui.sprite import (
     CAT_ASSETS_DIR,
@@ -37,9 +38,10 @@ from ui.sprite import (
 )
 from ui.timer_bubble import TimerBubble
 
-# 默认角色素材：第一只正式角色（单帧 sit，39x48 网格 @2x = 78x96 显示）
-# 旧的 idle.json（16x16 @8x 眨眼动画）与其余旧素材均原样保留，切换只需改这一行。
-DEFAULT_SPRITE_PATH: Path = CAT_ASSETS_DIR / "cat_sit.json"
+# 默认角色素材：坐姿 + 走路共用一张 39x48 画布（@2x = 78x96 显示）。
+# 走路帧由用户提供的 GIF 转成像素矩阵后合并进来，画布一致才能切换状态时窗口不跳。
+# 旧的 cat_sit.json / idle.json 仍原样保留，切换只需改这一行。
+DEFAULT_SPRITE_PATH: Path = CAT_ASSETS_DIR / "cat_study.json"
 
 # 自行判定双击时允许的最大位移（逻辑像素）：手指微抖仍算双击，但拖拽不会被误判
 DOUBLE_CLICK_MAX_SHIFT: int = 6
@@ -182,6 +184,10 @@ class PetWindow(QWidget):
         # 菜单展开前按当前状态刷新可用性与文案（"暂停"↔"继续"）
         self._menu.aboutToShow.connect(self._sync_menu_state)
 
+        self.autostart_action = self._menu.addAction("开机自启动")
+        self.autostart_action.setCheckable(True)
+        self.autostart_action.toggled.connect(self._toggle_autostart)
+
         self.study_action = self._menu.addAction("学习记录…")
         # triggered 会带一个 bool 参数，用 lambda 吞掉，避免多参传进无参信号
         self.study_action.triggered.connect(
@@ -207,6 +213,26 @@ class PetWindow(QWidget):
         self.pause_action.setText(
             "继续" if self._timer.state is TimerState.PAUSED else "暂停"
         )
+        self._sync_autostart()
+
+    # ---------- 开机自启动 ----------
+
+    def _sync_autostart(self) -> None:
+        """按注册表真实状态勾选菜单项。
+
+        setChecked 会触发 toggled，进而真的去写注册表；菜单展开时只是"回显"，
+        必须先把信号屏蔽掉。
+        """
+        self.autostart_action.blockSignals(True)
+        self.autostart_action.setChecked(autostart.is_enabled())
+        self.autostart_action.blockSignals(False)
+
+    def _toggle_autostart(self, checked: bool) -> None:
+        """用户点击后写入/删除注册表，并用真实结果回填勾选状态。"""
+        actual = autostart.set_enabled(checked)
+        self.autostart_action.blockSignals(True)
+        self.autostart_action.setChecked(actual)
+        self.autostart_action.blockSignals(False)
 
     # ---------- 专注计时 ----------
 
@@ -232,6 +258,8 @@ class PetWindow(QWidget):
         self._default_subject = subject
         self._timer.start(mode)
         self._finish_pending = True
+        # 学习开始：小猫原地走起来
+        self._player.set_walking(True)
         self._flash_token = None
         self._bubble.set_text(self._timer.display_text())
         self._bubble.show_near(self)
@@ -260,6 +288,7 @@ class PetWindow(QWidget):
         self._finish_pending = False
         self._timer.reset()
         self._tick.stop()
+        self._player.set_walking(False)
         self._hide_bubble()
 
     def _ask_subject(self) -> str | None:
@@ -290,6 +319,8 @@ class PetWindow(QWidget):
         self._finish_pending = False
         seconds = self._timer.stop()
         self._tick.stop()
+        # 学习结束：小猫停下来休息
+        self._player.set_walking(False)
         self.focusSessionFinished.emit(self._timer.mode.value, self._subject, seconds)
 
         minutes = seconds // 60
