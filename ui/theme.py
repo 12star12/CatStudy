@@ -279,6 +279,14 @@ QFrame#subjectRail {{
     border: none;
 }}
 
+/* 科目滚动区：不自带白底，透出奶油色装订边；选择器只覆盖
+   QScrollArea、视口和承载容器三层，不会波及科目按钮本身 */
+QScrollArea#subjectScroll,
+QScrollArea#subjectScroll > QWidget > QWidget {{
+    background: transparent;
+    border: none;
+}}
+
 QLabel#railTitle {{
     color: {Palette.INK_MUTED};
     font-size: 12px;

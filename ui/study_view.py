@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStyledItemDelegate,
     QStyle,
     QTableWidget,
@@ -135,10 +136,29 @@ class StudyRecordView(QWidget):
         title.setObjectName("railTitle")
         box.addWidget(title)
 
+        # 科目一多（截图里已 13 个）就会超出窗口高度，放进滚动区：
+        # 按钮列表整体可上下滚动，「科目」标题和装订边始终固定。
         self._subject_layout = QVBoxLayout()
         self._subject_layout.setSpacing(8)
-        box.addLayout(self._subject_layout)
-        box.addStretch(1)
+        self._subject_layout.setContentsMargins(0, 0, 0, 0)
+
+        tabs_host = QWidget(rail)
+        tabs_host.setObjectName("subjectTabsHost")
+        tabs_host.setLayout(self._subject_layout)
+
+        tabs_scroll = QScrollArea(rail)
+        tabs_scroll.setObjectName("subjectScroll")
+        tabs_scroll.setWidgetResizable(True)
+        tabs_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        tabs_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        tabs_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        tabs_scroll.setWidget(tabs_host)
+
+        box.addWidget(tabs_scroll, 1)
         return rail
 
     def _build_record_panel(self) -> QWidget:
