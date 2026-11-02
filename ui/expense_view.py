@@ -44,7 +44,7 @@ from core.expenses import (
     ExpenseRepository,
 )
 from ui.expense_dialog import ExpenseDialog
-from ui.formatting import format_balance_hint, format_money
+from ui.formatting import format_balance_hint, format_income_meta, format_money
 from ui.theme import Palette
 
 TABLE_HEADERS: tuple[str, ...] = ("日期", "分类", "金额", "账户", "备注")
@@ -269,6 +269,16 @@ class ExpenseView(QWidget):
         expense_row.addStretch(1)
         expense_row.addWidget(self.expense_label)
 
+        # 收入下面这行小字，是"创收"唯一的常驻入口：
+        # 不设目标、不催，只把"这个月记了几笔进账、今年累计多少"摆出来。
+        # 放在收入一侧而不是结余下面，是因为结余会被支出抵消，
+        # 而进账的笔数与年度累计不会——只有不会倒退的数才谈得上积累。
+        self.income_meta = QLabel("", card)
+        self.income_meta.setStyleSheet(
+            f"color: {Palette.INK_MUTED}; font-size: 11px;"
+        )
+        self.income_meta.setWordWrap(True)
+
         divider2 = QFrame(card)
         divider2.setObjectName("divider")
         divider2.setFixedHeight(1)
@@ -288,6 +298,7 @@ class ExpenseView(QWidget):
         box.addWidget(self.balance_hint)
         box.addWidget(divider)
         box.addLayout(income_row)
+        box.addWidget(self.income_meta)
         box.addLayout(expense_row)
         box.addWidget(divider2)
         box.addWidget(detail_caption)
@@ -498,11 +509,19 @@ class ExpenseView(QWidget):
         self.income_label.setStyleSheet(f"color: {Palette.INCOME};")
         self.expense_label.setStyleSheet(f"color: {Palette.INK};")
 
-        expense_rows = self._repo.category_totals(
-            self._year, self._month, FLOW_EXPENSE
-        )
         income_rows = self._repo.category_totals(
             self._year, self._month, FLOW_INCOME
+        )
+        self.income_meta.setText(
+            format_income_meta(
+                entries=self._repo.month_income_entries(self._year, self._month),
+                sources=len(income_rows),
+                year_cents=self._repo.year_income_cents(self._year),
+            )
+        )
+
+        expense_rows = self._repo.category_totals(
+            self._year, self._month, FLOW_EXPENSE
         )
         lines: list[str] = [
             f"{category}  {format_money(amount)}" for category, amount in expense_rows[:4]
@@ -547,7 +566,11 @@ class ExpenseView(QWidget):
         dialog = ExpenseDialog(
             self,
             expense=expense,
-            default_date=date(self._year, self._month, 1),
+            # 新记一笔默认"今天"，不是"当前查看月份的第一天"：
+            # 记账这个动作几乎总是发生在当天，翻着看三个月前的账再点记一笔，
+            # 日期却落在那个月一号，是最容易被忽略、也最难事后发现的数据错误。
+            # 编辑时用传进来的那笔自己的日期，不受这里影响。
+            default_date=date.today(),
             known_categories={
                 FLOW_EXPENSE: tuple(self._repo.list_categories(FLOW_EXPENSE)),
                 FLOW_INCOME: tuple(self._repo.list_categories(FLOW_INCOME)),

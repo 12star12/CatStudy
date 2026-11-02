@@ -240,8 +240,10 @@ def format_balance_hint(income_cents: int, expense_cents: int) -> str:
 
     net = income_cents - expense_cents
     if net < 0:
-        # 不写"花得比赚得多"：同一件事，这样说像判决，上面的说法像提醒
-        return f"还差 {format_money(-net)}，省一笔或多赚一笔"
+        # 不写"花得比赚得多"：同一件事，这样说像判决，上面的说法像提醒。
+        # "多赚"排在"少花"前面：只教省钱，等于告诉用户他永远在被限制；
+        # 把增量这条路先摆出来，才有可能让"创收"变成一个念头。
+        return f"还差 {format_money(-net)}，多赚一笔，或少花一笔"
     if net == 0:
         return "正好打平，记得很准"
 
@@ -251,3 +253,37 @@ def format_balance_hint(income_cents: int, expense_cents: int) -> str:
     if ratio >= BALANCE_PRAISE_OK:
         return "有结余，攒得住"
     return "结余不多，稳住就好"
+
+
+# ---------------------------------------------------------------------------
+# 收入区的小字
+# ---------------------------------------------------------------------------
+# 这段只有一个目的：让"进账"成为一件可以累积、值得再记一笔的事。
+#
+# 三条硬规矩：
+#
+# 1. **不写目标、不写还差多少。** 一旦有"离 ¥5000 还差 ¥4200"，用户就开始
+#    算账，而算账的尽头是把"我想多赚"换成"我还欠多少"——那是负担，不是动力。
+# 2. **不按月清零的只有"今年累计"。** 月度收入会被支出抵消（挣 800、花 1150，
+#    眼里只剩 −350），"今年累计进账"不会。它只增不减，才谈得上积累感。
+# 3. **没进账时不催。** 只留一句低门槛的入口（"多少都算"），因为把"没收入"
+#    写成待办，等于提醒用户他失败了一次。
+def format_income_meta(entries: int, sources: int, year_cents: int) -> str:
+    """收入下方那行小字。
+
+    - 本月无进账、今年也没有：``有进账就记一笔，多少都算``
+    - 本月无进账、今年有过：``这个月还没进账 · 今年累计 ¥6,800.00``
+    - 有进账：``本月 2 笔 · 2 个来源 · 今年累计 ¥6,800.00``
+      （来源只有 1 个时不显示，免得每月都一样的一句变成噪音）
+    """
+    if entries <= 0:
+        if year_cents > 0:
+            return f"这个月还没进账 · 今年累计 {format_money(year_cents)}"
+        return "有进账就记一笔，多少都算"
+
+    parts = [f"本月 {entries} 笔"]
+    if sources >= 2:
+        parts.append(f"{sources} 个来源")
+    if year_cents > 0:
+        parts.append(f"今年累计 {format_money(year_cents)}")
+    return " · ".join(parts)

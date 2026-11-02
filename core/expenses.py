@@ -261,6 +261,29 @@ class ExpenseRepository:
         ).fetchone()
         return int(row["total"])
 
+    def year_income_cents(self, year: int) -> int:
+        """某年**收入**合计（分）。
+
+        界面用它显示"今年累计进账"：这个数只增不减，跨月不清零，
+        和月度结余是两种东西——结余会被支出抵消，累计进账不会。
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM expenses "
+            "WHERE expense_date BETWEEN ? AND ? AND kind = ?",
+            (date(year, 1, 1).isoformat(), date(year, 12, 31).isoformat(), FLOW_INCOME),
+        ).fetchone()
+        return int(row["total"])
+
+    def month_income_entries(self, year: int, month: int) -> int:
+        """某月收入**笔数**。"""
+        start, end = _month_range(year, month)
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total FROM expenses "
+            "WHERE expense_date BETWEEN ? AND ? AND kind = ?",
+            (start.isoformat(), end.isoformat(), FLOW_INCOME),
+        ).fetchone()
+        return int(row["total"])
+
     def month_net_cents(self, year: int, month: int) -> int:
         """某月结余（分）= 收入 − 支出，可为负。"""
         return self.month_income_cents(year, month) - self.month_total_cents(

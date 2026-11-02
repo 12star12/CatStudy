@@ -19,11 +19,13 @@ from core.expenses import (
     presets_for,
 )
 from core.study_records import StudyRecordRepository
+from ui import expense_view as expense_view_module
 from ui.expense_dialog import ExpenseDialog
 from ui.expense_view import CATEGORY_TAB_ALL, ExpenseView
 from ui.formatting import (
     balance_ratio,
     format_balance_hint,
+    format_income_meta,
     format_money,
     format_money_plain,
     parse_money,
@@ -108,8 +110,10 @@ class BalanceHintTests(unittest.TestCase):
         self.assertIn("还差", hint)
         self.assertIn("¥18.39", hint)
         # 省钱和多赚两条路都要给：只说省，用户会觉得永远在被限制
-        self.assertIn("省", hint)
-        self.assertIn("赚", hint)
+        self.assertIn("多赚", hint)
+        self.assertIn("少花", hint)
+        # 而且"多赚"要排在"少花"前面：先给增量，再给节制
+        self.assertLess(hint.index("多赚"), hint.index("少花"))
 
     def test_break_even(self):
         self.assertIn("打平", format_balance_hint(5000, 5000))
@@ -136,6 +140,38 @@ class BalanceHintTests(unittest.TestCase):
         self.assertEqual(balance_ratio(100, 100), 0.0)
         self.assertAlmostEqual(balance_ratio(100, 30), 0.7)
         self.assertAlmostEqual(balance_ratio(100, 200), -1.0)
+
+
+class IncomeMetaTests(unittest.TestCase):
+    """收入小字：只陈述积累，不设目标。"""
+
+    def test_first_time_invites_low_threshold(self):
+        hint = format_income_meta(0, 0, 0)
+        self.assertIn("多少都算", hint)
+
+    def test_quiet_month_keeps_year_total(self):
+        """本月没进账但今年有过：不催，只把不清零的那个数留着。"""
+        hint = format_income_meta(0, 0, 680000)
+        self.assertIn("今年累计", hint)
+        self.assertIn("¥6,800.00", hint)
+        self.assertNotIn("还差", hint)
+
+    def test_counts_entries_and_sources(self):
+        hint = format_income_meta(2, 2, 680000)
+        self.assertIn("本月 2 笔", hint)
+        self.assertIn("2 个来源", hint)
+        self.assertIn("今年累计", hint)
+
+    def test_single_source_is_not_shown(self):
+        """来源只有一个时不显示，否则每个月都是一模一样的一句噪音。"""
+        self.assertNotIn("来源", format_income_meta(1, 1, 50000))
+
+    def test_no_target_language(self):
+        banned = ("还差", "目标", "完成度", "%", "加油")
+        for entries, sources, year in ((0, 0, 0), (0, 0, 900), (3, 2, 900)):
+            hint = format_income_meta(entries, sources, year)
+            for word in banned:
+                self.assertNotIn(word, hint, f"{entries}/{sources}/{year} -> {hint}")
 
 
 class ExpenseRepositoryTests(unittest.TestCase):
@@ -186,6 +222,20 @@ class ExpenseRepositoryTests(unittest.TestCase):
         self.repo.add("2026-11-02", 100, "吃饭")
         self.repo.add("2026-11-03", 100, "交通")
         self.assertEqual(self.repo.list_categories(), ["吃饭", "交通"])
+
+    def test_year_income_spans_months_but_not_years(self):
+        self.repo.add("2026-01-05", 500000, "工资", kind=FLOW_INCOME)
+        self.repo.add("2026-11-02", 80000, "稿费", kind=FLOW_INCOME)
+        self.repo.add("2026-11-03", 3000, "吃饭")  # 支出不该混进来
+        self.repo.add("2025-12-31", 999999, "工资", kind=FLOW_INCOME)  # 去年
+        self.assertEqual(self.repo.year_income_cents(2026), 580000)
+
+    def test_month_income_entries_counts_rows_not_money(self):
+        self.repo.add("2026-11-02", 300, "稿费", kind=FLOW_INCOME)
+        self.repo.add("2026-11-03", 900000, "工资", kind=FLOW_INCOME)
+        self.repo.add("2026-11-04", 1250, "吃饭")
+        self.assertEqual(self.repo.month_income_entries(2026, 11), 2)
+        self.assertEqual(self.repo.month_income_entries(2026, 12), 0)
 
     def test_update_and_delete(self):
         record_id = self.repo.add("2026-11-01", 100, "吃饭")
@@ -300,6 +350,49 @@ class ExpenseViewTests(unittest.TestCase):
         self.repo.add("2026-11-02", 800000, "工资", kind=FLOW_INCOME)
         self.view.refresh()
         self.assertIn("存下", self.view.balance_hint.text())
+
+    def test_income_meta_counts_sources(self):
+        self.repo.add("2026-11-02", 80000, "稿费", kind=FLOW_INCOME)
+        self.repo.add("2026-11-03", 500000, "工资", kind=FLOW_INCOME)
+        self.view.refresh()
+        text = self.view.income_meta.text()
+        self.assertIn("本月 2 笔", text)
+        self.assertIn("2 个来源", text)
+        self.assertIn("¥5,800.00", text)  # 今年累计
+
+    def test_income_meta_does_not_drop_when_spending(self):
+        """支出再多，进账那行的年度累计也不变——这是它区别于结余的地方。"""
+        self.repo.add("2026-11-02", 80000, "稿费", kind=FLOW_INCOME)
+        self.view.refresh()
+        before = self.view.income_meta.text()
+        self.repo.add("2026-11-03", 900000, "吃饭")
+        self.view.refresh()
+        self.assertIn("¥800.00", self.view.income_meta.text())
+        self.assertEqual(before, self.view.income_meta.text())
+
+    def test_income_meta_guides_first_entry(self):
+        self.view.refresh()
+        self.assertIn("多少都算", self.view.income_meta.text())
+
+    def test_new_expense_defaults_to_today(self):
+        """记一笔的默认日期是当天，不是当前浏览月份的一号。"""
+        self.view._year, self.view._month = 2025, 3
+        captured: dict = {}
+
+        class _StubDialog:
+            def __init__(self, parent, **kwargs):
+                captured.update(kwargs)
+
+            def exec(self):
+                return QDialog.DialogCode.Rejected
+
+        original = expense_view_module.ExpenseDialog
+        expense_view_module.ExpenseDialog = _StubDialog
+        try:
+            self.view.add_expense()
+        finally:
+            expense_view_module.ExpenseDialog = original
+        self.assertEqual(captured["default_date"], date.today())
 
 
 class WindowSwitchTests(unittest.TestCase):
