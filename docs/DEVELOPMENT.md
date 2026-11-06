@@ -38,7 +38,7 @@
 - 流水：收入与支出、分类筛选、可选联动账户余额、当月结余与分类明细、
   金额支持算式（`6.9+2.49`）
 - 开机自启动开关（注册表）
-- 452 项自动化测试
+- 476 项自动化测试
 
 ### 1.2 明确没做（别以为是漏了）
 
@@ -115,7 +115,7 @@ CatStudy/
 ├── tools/
 │   ├── extract_walk_frames.py  # GIF → 像素矩阵 JSON
 │   └── make_desktop_shortcut.py# 生成桌面 .lnk
-└── tests/                      # 452 项 unittest
+└── tests/                      # 476 项 unittest
 ```
 
 ### 2.3 建环境
@@ -1125,6 +1125,36 @@ subject = QRect(area.x(), clock.bottom() + gap_subject,      area.width(), 52)
 
 否则按一次 Esc 偏好就被清掉，这个开关退化成纯手动，每次都得重新勾。
 
+### 8.11 完成庆祝礼花 `ui/celebration.py`
+
+一次专注满 1 分钟落库后，全屏炸开几簇像素礼花 + 一句祝贺，约 4.2 秒自动消散。
+由 `PetWindow._complete_focus()` 触发（`minutes >= 1` 才放，不足 1 分钟只有气泡提示）。
+
+三条取舍（延续"猫不索取"）：
+
+| 取舍 | 理由 |
+|---|---|
+| `WA_TransparentForMouseEvents` + `WA_ShowWithoutActivating` | 礼花不是要人操作的东西：点击穿透到底下的计时牌/桌面，弹出瞬间不抢正在打字的人的焦点 |
+| 不设按钮、不问"再来一个？" | 庆祝只属于刚完成的那段专注；推销下一轮是养成 App 的钩子 |
+| 像素方块粒子（关闭抗锯齿） | 猫是像素画，抗锯齿圆点会像别的 App 乱入 |
+
+实现要点：
+
+- 运动学是**纯函数**：`spawn_burst(cx, cy, rng)` 生成径向速度 + 随机寿命的
+  `Particle`（颜色存 RGB 元组而非 QColor，纯数据可脱离 Qt 测试）；
+  `advance(particles, dt, gravity)` 抛物线推进并剔除过期颗粒，**返回新列表不改入参**。
+- 爆点计划 `BURST_SCHEDULE` 是 `(触发秒, x 比例, y 比例)` 的序列（4 簇，约 1.3 秒内放完），
+  `_step()` 按 16ms 步进触发并推进。
+- 窗口几何与 `focus_overlay` 同一套"所有屏幕并集"规则；总时长 `DISPLAY_MS=4200`，
+  前 220ms 淡入、末 600ms 淡出（`_fade_alpha` 乘到每个粒子和文字上）。
+- 文字 = 暖白 `#FFF6E6` + 近黑暖褐阴影（同计时牌），任何桌面壁纸下都可读。
+- 接线：`PetWindow.start_focus()` 开新会话时 `dismiss()` 未散完的旧礼花；
+  `PetWindow.celebration` 属性供测试断言。
+
+测试：`tests/test_celebration.py`——纯函数（数量/速度界/重力/过期/不可变）、
+窗口（穿透属性/自动消散/重放重置）、接线（番茄钟与正计时的文字区分、
+不足 1 分钟不放、新会话撤旧礼花）。
+
 ---
 
 ## 9. 界面层
@@ -1508,7 +1538,7 @@ cd /d D:\CatStudy
 
 无显示器的环境需要 `set QT_QPA_PLATFORM=offscreen`，但**离屏下中文会渲染成方块、遮罩也不准**，只能验布局不能验观感。
 
-### 11.2 分布（452 项）
+### 11.2 分布（476 项）
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -1526,8 +1556,9 @@ cd /d D:\CatStudy
 | `test_focus_overlay.py` | 22 | 铺满几何、读数一致、三态绘制、进度比例、Esc/点击/冷却、偏好与可见性解耦、收起联动 |
 | `test_journal.py` | 38 | 日记仓储（覆盖/空删/排序/月度边界/非法日期）、v6→v7 迁移、视图自动保存与切日、页签顺序 |
 | `test_notebook_view.py` | 12 | 科目标签、统计（今日合计、连续打卡） |
+| `test_celebration.py` | 13 | 礼花纯函数（数量/速度界/重力/过期/不可变）、穿透窗口、自动消散、桌宠接线（文字区分/不足1分钟不放/新会话撤旧） |
 
-合计 452 项，全部通过。
+合计 476 项，全部通过。
 
 ### 11.3 四类测试策略
 
@@ -1748,9 +1779,10 @@ lnk.link_flags.IsUnicode = True
 | `core/autostart.py` | 114 | `is_enabled/set_enabled/command`, `RUN_KEY` | 注册表自启动 |
 | `core/growth.py` | 28 | `GrowthSystem` | 骨架，未实现 |
 | `ui/sprite.py` | 413 | `SpriteSheet`, `AnimationPlayer`, `FrameRoles`, `WALK_FRAME_MS` | 素材加载与动画调度 |
-| `ui/pet_window.py` | 543 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 两个 Signal | 桌宠窗口 |
+| `ui/pet_window.py` | 581 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
 | `ui/timer_bubble.py` | 109 | `TimerBubble` | 独立气泡窗口 |
 | `ui/focus_overlay.py` | 390 | `FocusOverlay`, `REFRESH_MS`, `progress_ratio` | 全屏计时牌 |
+| `ui/celebration.py` | 343 | `CelebrationOverlay`, `Particle`, `spawn_burst`, `advance`, `DISPLAY_MS` | 完成庆祝礼花（纯函数运动学 + 点击穿透窗口） |
 | `ui/theme.py` | 443 | `Palette`, `STYLESHEET`, `apply_theme` | 配色与全局样式 |
 | `ui/formatting.py` | 253 | `format_money`, `parse_money`, `format_balance_hint` | 纯函数文案 + 金额算式 + 结余评语 |
 | `ui/record_dialog.py` | 184 | `RecordDialog`, `SUBJECT_PRESETS` | 学习记录表单 |

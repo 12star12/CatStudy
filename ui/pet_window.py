@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMenu, QWidget
 
 from core import autostart
 from core.timer import FocusTimer, TimerMode, TimerState
+from ui.celebration import CelebrationOverlay
 from ui.focus_overlay import FocusOverlay
 from ui.sprite import (
     CAT_ASSETS_DIR,
@@ -120,6 +121,8 @@ class PetWindow(QWidget):
 
         # 全屏计时牌：惰性创建（只有真正用时才建窗口），创建后复用
         self._overlay: FocusOverlay | None = None
+        # 完成庆祝礼花：同样惰性创建、复用；一次专注满 1 分钟才放
+        self._celebration: CelebrationOverlay | None = None
         # "我想要全屏"的偏好：与"当前是否可见"分开存。
         # 按下 Esc 只是这一场不想看，不该顺手把偏好也取消掉——
         # 否则下次还得重新勾一遍，这个开关就成了纯手动。
@@ -313,6 +316,9 @@ class PetWindow(QWidget):
         self._default_subject = subject
         self._timer.start(mode)
         self._finish_pending = True
+        # 新会话开始：上一场的礼花还没散完就先撤掉，别让庆祝盖住新一局
+        if self._celebration is not None:
+            self._celebration.dismiss()
         # 学习开始：小猫原地走起来
         self._player.set_walking(True)
         self._flash_token = None
@@ -386,9 +392,27 @@ class PetWindow(QWidget):
         minutes = seconds // 60
         if minutes >= 1:
             message = f"✓ {minutes} 分钟已记录"
+            self._celebrate(minutes)
         else:
             message = "不足 1 分钟，未记录"
         self._flash(message)
+
+    def _celebrate(self, minutes: int) -> None:
+        """满 1 分钟的完成场次放一场礼花；文字按模式区分。"""
+        if self._celebration is None:
+            self._celebration = CelebrationOverlay()
+        if self._timer.mode is TimerMode.POMODORO:
+            headline = "🎉 番茄钟完成"
+        else:
+            headline = "🎉 专注完成"
+        self._celebration.celebrate(
+            headline, f"{minutes} 分钟已经记进今天，干得漂亮"
+        )
+
+    @property
+    def celebration(self) -> CelebrationOverlay | None:
+        """当前礼花窗口（未创建时为 None；测试用）。"""
+        return self._celebration
 
     def _flash(self, message: str) -> None:
         """短暂显示一条结果提示，随后自动隐藏。"""
