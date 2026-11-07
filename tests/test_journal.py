@@ -293,7 +293,7 @@ class JournalWiringTests(unittest.TestCase):
     def test_journal_tab_follows_study(self) -> None:
         window = self._window(journal_repository=self.journal)
         labels = [b.text() for b, _ in window._tabs]
-        self.assertEqual(labels, ["学习记录", "日记"])
+        self.assertEqual(labels, ["学习记录", "日记", "统计"])
         self.assertIs(window.stack.widget(1), window.journal_view)
 
     def test_tab_order_with_all_repositories(self) -> None:
@@ -306,12 +306,12 @@ class JournalWiringTests(unittest.TestCase):
             journal_repository=self.journal,
         )
         labels = [b.text() for b, _ in window._tabs]
-        self.assertEqual(labels, ["学习记录", "日记", "资产", "流水"])
+        self.assertEqual(labels, ["学习记录", "日记", "资产", "流水", "统计"])
 
     def test_no_journal_page_without_repository(self) -> None:
         window = self._window()
         self.assertIsNone(window.journal_view)
-        self.assertEqual(window.stack.count(), 1)
+        self.assertEqual(window.stack.count(), 2)  # 学习记录 + 统计
 
     def test_switch_to_journal(self) -> None:
         window = self._window(journal_repository=self.journal)

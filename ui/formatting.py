@@ -51,6 +51,26 @@ def format_duration(minutes: int | None) -> str:
     return format_minutes(minutes)
 
 
+def format_total(minutes: int) -> str:
+    """统计页的合计时长：短的一栏写清分钟，长的换成天/小时，别堆成一串。
+
+    ``45 -> 45 分钟``、``380 -> 6 小时 20 分``、``1000 -> 17 小时``、
+    ``3000 -> 2 天 2 小时``。饼图中心的字要短，`format_minutes` 那种
+    "150 小时 30 分"在一年视图里会顶出圆环。
+    """
+    if minutes <= 0:
+        return "0 分钟"
+    if minutes < 60:
+        return f"{minutes} 分钟"
+    if minutes < 600:
+        return format_minutes(minutes)
+    hours = round(minutes / 60)
+    if hours < 24:
+        return f"{hours} 小时"
+    days, rest = divmod(hours, 24)
+    return f"{days} 天 {rest} 小时" if rest else f"{days} 天"
+
+
 def format_day_title(value: str | date | datetime) -> str:
     """当天标题：``2026-10-31 -> 10月31日 周六``。"""
     day = to_date(value)

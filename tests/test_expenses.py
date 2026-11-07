@@ -409,7 +409,7 @@ class WindowSwitchTests(unittest.TestCase):
 
     def test_both_pages_present(self):
         self.assertIsNotNone(self.window.expense_view)
-        self.assertEqual(self.window.stack.count(), 2)
+        self.assertEqual(self.window.stack.count(), 3)  # + 统计页
         self.assertEqual(self.window.stack.currentIndex(), 0)
 
     def test_switch_to_ledger(self):
@@ -418,11 +418,12 @@ class WindowSwitchTests(unittest.TestCase):
         self.assertTrue(self.window.expense_tab.isChecked())
         self.assertFalse(self.window.study_tab.isChecked())
 
-    def test_switch_without_ledger_keeps_single_page(self):
+    def test_switch_without_ledger_keeps_single_study_page(self):
         plain = MainWindow(StudyRecordRepository(self.db))
         self.addCleanup(plain.deleteLater)
-        self.assertEqual(plain.stack.count(), 1)
-        plain.show_page(1)  # 越界请求应被忽略
+        self.assertEqual(plain.stack.count(), 2)  # 学习记录 + 统计
+        self.assertIsNone(plain.expense_tab)
+        plain.show_page(5)  # 越界请求应被忽略
         self.assertEqual(plain.stack.currentIndex(), 0)
 
 

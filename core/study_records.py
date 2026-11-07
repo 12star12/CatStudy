@@ -218,6 +218,59 @@ class StudyRecordRepository:
         ).fetchall()
         return [str(r["study_date"]) for r in rows]
 
+    def subject_totals(
+        self,
+        start: str | date | datetime | None = None,
+        end: str | date | datetime | None = None,
+    ) -> list[tuple[str, int]]:
+        """区间内各科目的时长合计，按时长降序；用于统计页的饼图。
+
+        ``start``/``end`` 都为 ``None`` 表示"全部时间"。时长为空的记录
+        （从未填写时长）对占比没有意义，用 ``HAVING`` 过滤掉，避免图例里
+        出现一堆 0 分钟的科目。
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if start is not None:
+            clauses.append("study_date >= ?")
+            params.append(normalize_date(start))
+        if end is not None:
+            clauses.append("study_date <= ?")
+            params.append(normalize_date(end))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            "SELECT subject, SUM(COALESCE(duration_minutes, 0)) AS minutes "
+            f"FROM study_records{where} "
+            "GROUP BY subject HAVING minutes > 0 "
+            "ORDER BY minutes DESC, subject ASC",
+            tuple(params),
+        ).fetchall()
+        return [(str(r["subject"]), int(r["minutes"])) for r in rows]
+
+    def record_count_in_range(
+        self,
+        start: str | date | datetime | None = None,
+        end: str | date | datetime | None = None,
+    ) -> int:
+        """区间内的记录条数（统计页底部那句"共 N 条记录"）。
+
+        与 :meth:`subject_totals` 分开统计：没填时长的记录也占一条，
+        两者口径不同，不能拿合计条数去解释饼图。
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if start is not None:
+            clauses.append("study_date >= ?")
+            params.append(normalize_date(start))
+        if end is not None:
+            clauses.append("study_date <= ?")
+            params.append(normalize_date(end))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM study_records{where}", tuple(params)
+        ).fetchone()
+        return int(row["n"])
+
     def count(self, study_date: str | date | datetime | None = None) -> int:
         """记录总数；给定日期时只统计当天。"""
         if study_date is None:

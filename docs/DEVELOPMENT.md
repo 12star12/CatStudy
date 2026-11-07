@@ -38,7 +38,7 @@
 - 流水：收入与支出、分类筛选、可选联动账户余额、当月结余与分类明细、
   金额支持算式（`6.9+2.49`）
 - 开机自启动开关（注册表）
-- 485 项自动化测试
+- 521 项自动化测试
 
 ### 1.2 明确没做（别以为是漏了）
 
@@ -115,7 +115,7 @@ CatStudy/
 ├── tools/
 │   ├── extract_walk_frames.py  # GIF → 像素矩阵 JSON
 │   └── make_desktop_shortcut.py# 生成桌面 .lnk
-└── tests/                      # 485 项 unittest
+└── tests/                      # 521 项 unittest
 ```
 
 ### 2.3 建环境
@@ -1499,6 +1499,44 @@ def _confirm_delete(self, subject) -> bool       # 正常弹 QMessageBox
 选中态与日期是两套状态：`_select_in_list()` 在切换时先 `blockSignals(True)`，
 否则 `setCurrentRow` 会反过来触发 `set_selected_date`，形成回环。
 
+### 9.9 专注统计 `ui/stats_view.py`
+
+回答一个问题：**这段时间里，时间花在哪些科目上，各占多少。**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ 专注统计            [今天][本周][本月][今年][全部]        │
+│ ┌──────────────────────────────────────────────────────┐ │
+│ │   ╭──╮   科目占比                                     │ │
+│ │  │    │  ● 数学      5 小时 33 分 · 21%               │ │
+│ │  │ 合计 │  ● 算法      4 小时 28 分 · 17%               │ │
+│ │   ╰──╯   ……（最多 8 行，尾部并成"其他"）               │ │
+│ └──────────────────────────────────────────────────────┘ │
+│ 62 条记录 · 合计 25 小时 56 分 · 占比按时长计算           │
+└──────────────────────────────────────────────────────────┘
+```
+
+| 取舍 | 理由 |
+|---|---|
+| 区间固定五个（今天/本周/本月/今年/全部），不做自定义日期范围 | 这个页回答"最近的时间花在哪"，不是查账；细查去学习记录页 |
+| 占比按**时长**，不按次数 | 次数把 25 分钟和 90 分钟算成一样重 |
+| 扇区上限 8，尾部并"其他"（中性灰） | 14 个科目 14 条细线没法读；合并逻辑在 `core/stats.group_slices` |
+| 不设目标、不标红"占比过低" | 猫不索取，统计页也不训人 |
+
+实现要点：
+
+- 区间→闭区间是纯函数 `period_bounds(period, today)`（本周 = 周一到周日，
+  含未来日期不截断——截断会让"本周"在周一看起来像丢了数据）；
+  聚合查询 `StudyRecordRepository.subject_totals(start, end)`（UI 零 SQL 纪律，
+  `HAVING minutes > 0` 把没填时长的科目挡在图例外）。
+- 环形图 `DonutChart` 纯 QPainter 自绘：`QPainterPath` 外弧 + 内弧反向收口；
+  **整圆走布尔相减**（`addEllipse` 后 `subtracted`），`arcTo` 在 360° 时某些
+  Qt 版本画不出东西；不"画饼再盖背景色圆"，那要求洞色与卡片底色一致，换主题穿帮。
+- 中心两行字：`format_total`（≥10 小时换算成天/小时，"150 小时 30 分"会顶出圆环）。
+- 刷新时机：`showEvent`（每次切到本页重查）+ `MainWindow.refresh()`；
+  图例重建时必须把布局里的弹簧一起 `takeAt` 清掉，否则刷新几次堆一串空白。
+- 页签排在**最后**：统计是"记录之后的概览"；页数断言相关的旧测试已同步 +1。
+
 ---
 
 ## 10. 接线 `main.py`
@@ -1563,7 +1601,7 @@ cd /d D:\CatStudy
 
 无显示器的环境需要 `set QT_QPA_PLATFORM=offscreen`，但**离屏下中文会渲染成方块、遮罩也不准**，只能验布局不能验观感。
 
-### 11.2 分布（485 项）
+### 11.2 分布（521 项）
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -1582,9 +1620,10 @@ cd /d D:\CatStudy
 | `test_journal.py` | 38 | 日记仓储（覆盖/空删/排序/月度边界/非法日期）、v6→v7 迁移、视图自动保存与切日、页签顺序 |
 | `test_notebook_view.py` | 12 | 科目标签、统计（今日合计、连续打卡） |
 | `test_quick_pause.py` | 9 | 单击（双击间隔后）暂停、抖动不算拖拽、拖拽不暂停、双击只开记录、热键返回值与状态、暂停时猫停走、菜单热键提示 |
+| `test_stats.py` | 36 | 区间边界（周一/月末/闰年）、扇区合并、占比文案、聚合查询（区间/空时长排除/条数口径）、环形图（整圆/空态/离屏渲染）、页面切换与空状态、主面板页签 |
 | `test_celebration.py` | 13 | 礼花纯函数（数量/速度界/重力/过期/不可变）、穿透窗口、自动消散、桌宠接线（文字区分/不足1分钟不放/新会话撤旧） |
 
-合计 485 项，全部通过。
+合计 521 项，全部通过。
 
 ### 11.3 四类测试策略
 
@@ -1797,7 +1836,8 @@ lnk.link_flags.IsUnicode = True
 |---|---|---|---|
 | `main.py` | 110 | `main`, `configure_application`, `last_subject`, `save_focus_session` | 启动时序与信号接线 |
 | `core/database.py` | 398 | `DatabaseManager`, `SCHEMA_VERSION=5`, `init_database` | 连接、建表、迁移 |
-| `core/study_records.py` | 286 | `StudyRecord`, `StudyRecordRepository`, `normalize_date`, `SOURCES` | 学习记录仓储 |
+| `core/stats.py` | 104 | `PERIODS`, `period_bounds`, `group_slices`, `MAX_SLICES`, `format_share` | 统计区间与占比（纯函数） |
+| `core/study_records.py` | 339 | `StudyRecord`, `StudyRecordRepository`, `normalize_date`, `SOURCES` | 学习记录仓储 |
 | `core/accounts.py` | 424 | `Account`, `AccountRepository`, `NetWorth`, `Snapshot`, `ASSET`/`LIABILITY` | 资产/负债与快照 |
 | `core/journal.py` | 176 | `JournalEntry`, `JournalRepository`, `MAX_CONTENT_LENGTH` | 日记仓储 |
 | `core/expenses.py` | 447 | `Expense`, `ExpenseRepository`, `flow_delta`, `FLOW_EXPENSE/INCOME` | 收支流水仓储 + 账户联动 |
@@ -1807,11 +1847,13 @@ lnk.link_flags.IsUnicode = True
 | `ui/sprite.py` | 413 | `SpriteSheet`, `AnimationPlayer`, `FrameRoles`, `WALK_FRAME_MS` | 素材加载与动画调度 |
 | `ui/pet_window.py` | 678 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
 | `ui/timer_bubble.py` | 109 | `TimerBubble` | 独立气泡窗口 |
+| `ui/stats_view.py` | 275 | `StatsView`, `LEGEND_NAME_LIMIT` | 专注统计页（区间 + 环形图 + 图例） |
+| `ui/pie_chart.py` | 198 | `DonutChart`, `donut_path`, `SLICE_COLORS`, `color_for` | 科目占比环形图（纯自绘，无图表库） |
 | `ui/focus_overlay.py` | 390 | `FocusOverlay`, `REFRESH_MS`, `progress_ratio` | 全屏计时牌 |
 | `ui/hotkey.py` | 100 | `HOTKEY_ID`, `HOTKEY_LABEL`, `register`, `unregister`, `is_hotkey_message` | 全局暂停热键（ctypes） |
 | `ui/celebration.py` | 343 | `CelebrationOverlay`, `Particle`, `spawn_burst`, `advance`, `DISPLAY_MS` | 完成庆祝礼花（纯函数运动学 + 点击穿透窗口） |
 | `ui/theme.py` | 443 | `Palette`, `STYLESHEET`, `apply_theme` | 配色与全局样式 |
-| `ui/formatting.py` | 253 | `format_money`, `parse_money`, `format_balance_hint` | 纯函数文案 + 金额算式 + 结余评语 |
+| `ui/formatting.py` | 309 | `format_money`, `parse_money`, `format_balance_hint` | 纯函数文案 + 金额算式 + 结余评语 |
 | `ui/record_dialog.py` | 184 | `RecordDialog`, `SUBJECT_PRESETS` | 学习记录表单 |
 | `ui/study_view.py` | 735 | `StudyRecordView`, `RAIL_WIDTH`, `CARD_WIDTH` | 三栏学习记录 |
 | `ui/journal_view.py` | 362 | `JournalView`, `AUTOSAVE_MS`, `SUMMARY_LIMIT` | 日记页 |

@@ -1,4 +1,4 @@
-"""主面板窗口（学习记录 / 日记 / 资产 / 流水）与它的生命周期管理器。
+"""主面板窗口（学习记录 / 日记 / 资产 / 流水 / 统计）与它的生命周期管理器。
 
 ``MainWindow`` 只做三件事：建窗口、把各页装进 ``QStackedWidget``、维护顶部
 页签的选中态。``StudyWindowManager`` 负责"全局只有一个面板窗口"：首次打开时
@@ -35,6 +35,7 @@ from core.study_records import StudyRecordRepository
 from ui.assets_view import AssetsView
 from ui.expense_view import ExpenseView
 from ui.journal_view import JournalView
+from ui.stats_view import StatsView
 from ui.study_view import StudyRecordView
 
 
@@ -71,6 +72,8 @@ class MainWindow(QMainWindow):
             if expense_repository is not None
             else None
         )
+        # 统计页只依赖学习记录，因此永远存在；放在最后，作为"记录之后的概览"
+        self.stats_view = StatsView(repository, self)
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -85,6 +88,7 @@ class MainWindow(QMainWindow):
         # （"现在有多少"比"这月花了什么"更常看）。
         self._tabs: list[tuple[QPushButton, QWidget]] = []
         self.study_tab = self._make_tab("学习记录", self.view)
+        self.stats_tab: QPushButton | None = None
         self.journal_tab: QPushButton | None = None
         self.assets_tab: QPushButton | None = None
         self.expense_tab: QPushButton | None = None
@@ -98,6 +102,8 @@ class MainWindow(QMainWindow):
         if self.expense_view is not None:
             self.stack.addWidget(self.expense_view)
             self.expense_tab = self._make_tab("流水", self.expense_view)
+        self.stack.addWidget(self.stats_view)
+        self.stats_tab = self._make_tab("统计", self.stats_view)
 
         if self._tabs:
             layout.addLayout(self._build_switch())
@@ -160,6 +166,7 @@ class MainWindow(QMainWindow):
             self.assets_view.refresh()
         if self.expense_view is not None:
             self.expense_view.refresh()
+        self.stats_view.refresh()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名风格)
         # 隐藏期间可能有别的地方改了数据（番茄钟落库、改了余额），

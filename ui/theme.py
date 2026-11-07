@@ -501,6 +501,65 @@ QPushButton#linkButton:hover {{
     color: {Palette.ROSE};
     background-color: transparent;
 }}
+
+/* ---------------- 专注统计页 ---------------- */
+
+QLabel#statsTitle {{
+    color: {Palette.INK_STRONG};
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}}
+
+/* 区间胶囊：未选中只描边，选中填粉——与顶部页签同一套语言 */
+QPushButton#periodButton {{
+    background-color: {Palette.PAPER};
+    border: 1px solid {Palette.NOTEBOOK_BORDER};
+    border-radius: 13px;
+    padding: 4px 14px;
+    color: {Palette.INK};
+}}
+QPushButton#periodButton:hover {{
+    border-color: {Palette.ROSE};
+}}
+QPushButton#periodButton:checked {{
+    background-color: {Palette.TAB_PINK};
+    border-color: #D9A8AA;
+    color: {Palette.INK_STRONG};
+    font-weight: 600;
+}}
+
+QFrame#statsCard {{
+    background-color: {Palette.PAPER_CARD};
+    border: 1px solid {Palette.NOTEBOOK_BORDER};
+    border-radius: 18px;
+}}
+
+QLabel#statsCaption {{
+    color: {Palette.INK_MUTED};
+    font-size: 12px;
+    letter-spacing: 2px;
+}}
+
+/* 图例滚动区与视口都透出卡片底色，否则会露一条系统灰 */
+QScrollArea#legendScroll,
+QScrollArea#legendScroll > QWidget > QWidget,
+QWidget#legendHost {{
+    background: transparent;
+    border: none;
+}}
+
+QLabel#legendName {{
+    color: {Palette.INK};
+}}
+QLabel#legendValue {{
+    color: {Palette.INK_MUTED};
+}}
+QLabel#statsEmpty,
+QLabel#statsHint {{
+    color: {Palette.INK_MUTED};
+    font-size: 12px;
+}}
 """
 
 

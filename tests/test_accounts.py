@@ -416,12 +416,13 @@ class ThreeTabTests(_RepoCase):
             expense_repository=ExpenseRepository(self.db),
             account_repository=self.repo,
         )
-        self.assertEqual(window.stack.count(), 3)
+        # 统计页只依赖学习记录，因此总在最后多一页
+        self.assertEqual(window.stack.count(), 4)
         self.assertEqual(window.stack.currentIndex(), 0)
         self.assertIsNotNone(window.assets_view)
         self.assertIsNotNone(window.expense_view)
         labels = [b.text() for b, _ in window._tabs]
-        self.assertEqual(labels, ["学习记录", "资产", "流水"])
+        self.assertEqual(labels, ["学习记录", "资产", "流水", "统计"])
 
     def test_switch_to_assets(self) -> None:
         window = self._window(
@@ -443,16 +444,16 @@ class ThreeTabTests(_RepoCase):
         self.assertEqual(window.current_page(), window.expense_view)
         self.assertTrue(window.expense_tab.isChecked())
 
-    def test_only_study_page_when_no_repositories(self) -> None:
+    def test_only_study_and_stats_when_no_repositories(self) -> None:
         window = self._window()
-        self.assertEqual(window.stack.count(), 1)
-        window.show_page(1)  # 越界忽略
+        self.assertEqual(window.stack.count(), 2)  # 学习记录 + 统计
+        window.show_page(2)  # 越界忽略
         self.assertEqual(window.stack.currentIndex(), 0)
 
     def test_assets_page_independent_of_ledger(self) -> None:
         """只传账户仓储时，资产页就是第 2 页（不依赖流水是否存在）。"""
         window = self._window(account_repository=self.repo)
-        self.assertEqual(window.stack.count(), 2)
+        self.assertEqual(window.stack.count(), 3)  # 学习记录 + 资产 + 统计
         window.show_page(1)
         self.assertEqual(window.current_page(), window.assets_view)
         self.assertIsNone(window.expense_tab)
