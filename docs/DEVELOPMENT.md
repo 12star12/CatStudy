@@ -38,7 +38,7 @@
 - 流水：收入与支出、分类筛选、可选联动账户余额、当月结余与分类明细、
   金额支持算式（`6.9+2.49`）
 - 开机自启动开关（注册表）
-- 476 项自动化测试
+- 485 项自动化测试
 
 ### 1.2 明确没做（别以为是漏了）
 
@@ -115,7 +115,7 @@ CatStudy/
 ├── tools/
 │   ├── extract_walk_frames.py  # GIF → 像素矩阵 JSON
 │   └── make_desktop_shortcut.py# 生成桌面 .lnk
-└── tests/                      # 476 项 unittest
+└── tests/                      # 485 项 unittest
 ```
 
 ### 2.3 建环境
@@ -1155,6 +1155,31 @@ subject = QRect(area.x(), clock.bottom() + gap_subject,      area.width(), 52)
 窗口（穿透属性/自动消散/重放重置）、接线（番茄钟与正计时的文字区分、
 不足 1 分钟不放、新会话撤旧礼花）。
 
+### 8.12 一键暂停（单击 / 全局热键）
+
+"站起来要去洗手间"是最常见的暂停场景，而原来的暂停藏在右键菜单第二层：
+右键 → 找"暂停" → 点。两步瞄准，人在急的时候不会做。
+
+两个入口：
+
+1. **鼠标单击猫身**切换暂停/继续。
+2. **全局热键 `Ctrl+Alt+Space`**。桌宠是 `Qt.Tool` 且几乎从不获得焦点，
+   `QShortcut` 只在窗口有焦点时触发，所以必须走系统级注册：
+   `ctypes` 调 `user32.RegisterHotKey(hwnd, HOTKEY_ID, Ctrl|Alt|MOD_NOREPEAT, VK_SPACE)`，
+   热键注册在**桌宠自己的原生句柄**上，`WM_HOTKEY` 直接投递到该窗口，
+   由 `PetWindow.nativeEvent` 接住（见 `ui/hotkey.py`）。注册失败（被别的软件占用）
+   静默降级为单击/菜单，不影响启动；`closeEvent` 里必须解绑，否则系统留一个死热键。
+
+单击的三个坑（都在 `tests/test_quick_pause.py` 里钉住）：
+
+| 坑 | 处理 |
+|---|---|
+| 单击与双击前半程无法即时区分 | 释放后延时 `双击间隔 + 20ms` 才触发，令牌机制：期间任何新按下都作废旧令牌 |
+| 双击的第二次释放会再排一次单击 | 该次按下 `_tap_allowed=False`，双击只开学习记录，不停表 |
+| 手指微抖被当成拖拽 | 位移超过 `DOUBLE_CLICK_MAX_SHIFT`(6px) 才真正移动窗口，否则仍算单击 |
+
+附带行为：暂停时 `set_walking(False)`，猫跟着停下来坐着；继续时重新走。
+
 ---
 
 ## 9. 界面层
@@ -1538,7 +1563,7 @@ cd /d D:\CatStudy
 
 无显示器的环境需要 `set QT_QPA_PLATFORM=offscreen`，但**离屏下中文会渲染成方块、遮罩也不准**，只能验布局不能验观感。
 
-### 11.2 分布（476 项）
+### 11.2 分布（485 项）
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -1556,9 +1581,10 @@ cd /d D:\CatStudy
 | `test_focus_overlay.py` | 22 | 铺满几何、读数一致、三态绘制、进度比例、Esc/点击/冷却、偏好与可见性解耦、收起联动 |
 | `test_journal.py` | 38 | 日记仓储（覆盖/空删/排序/月度边界/非法日期）、v6→v7 迁移、视图自动保存与切日、页签顺序 |
 | `test_notebook_view.py` | 12 | 科目标签、统计（今日合计、连续打卡） |
+| `test_quick_pause.py` | 9 | 单击（双击间隔后）暂停、抖动不算拖拽、拖拽不暂停、双击只开记录、热键返回值与状态、暂停时猫停走、菜单热键提示 |
 | `test_celebration.py` | 13 | 礼花纯函数（数量/速度界/重力/过期/不可变）、穿透窗口、自动消散、桌宠接线（文字区分/不足1分钟不放/新会话撤旧） |
 
-合计 476 项，全部通过。
+合计 485 项，全部通过。
 
 ### 11.3 四类测试策略
 
@@ -1779,9 +1805,10 @@ lnk.link_flags.IsUnicode = True
 | `core/autostart.py` | 114 | `is_enabled/set_enabled/command`, `RUN_KEY` | 注册表自启动 |
 | `core/growth.py` | 28 | `GrowthSystem` | 骨架，未实现 |
 | `ui/sprite.py` | 413 | `SpriteSheet`, `AnimationPlayer`, `FrameRoles`, `WALK_FRAME_MS` | 素材加载与动画调度 |
-| `ui/pet_window.py` | 581 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
+| `ui/pet_window.py` | 678 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
 | `ui/timer_bubble.py` | 109 | `TimerBubble` | 独立气泡窗口 |
 | `ui/focus_overlay.py` | 390 | `FocusOverlay`, `REFRESH_MS`, `progress_ratio` | 全屏计时牌 |
+| `ui/hotkey.py` | 100 | `HOTKEY_ID`, `HOTKEY_LABEL`, `register`, `unregister`, `is_hotkey_message` | 全局暂停热键（ctypes） |
 | `ui/celebration.py` | 343 | `CelebrationOverlay`, `Particle`, `spawn_burst`, `advance`, `DISPLAY_MS` | 完成庆祝礼花（纯函数运动学 + 点击穿透窗口） |
 | `ui/theme.py` | 443 | `Palette`, `STYLESHEET`, `apply_theme` | 配色与全局样式 |
 | `ui/formatting.py` | 253 | `format_money`, `parse_money`, `format_balance_hint` | 纯函数文案 + 金额算式 + 结余评语 |

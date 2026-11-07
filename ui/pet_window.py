@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMenu, QWidget
 
 from core import autostart
 from core.timer import FocusTimer, TimerMode, TimerState
+from ui import hotkey
 from ui.celebration import CelebrationOverlay
 from ui.focus_overlay import FocusOverlay
 from ui.sprite import (
@@ -56,6 +57,10 @@ REQUEST_DEDUPE_SECONDS: float = 0.35
 # 若不复位，此后每一次按下都会被当成重复派发而丢弃，拖动与双击一起失灵。
 # 取 1.5 秒：远大于系统双击间隔（默认 0.5 秒），不会干扰正常双击。
 STALE_PRESS_SECONDS: float = 1.5
+
+# 单击判定的额外等待（毫秒）。单击要等过一个系统双击间隔才敢确认
+# "这不是双击的前半程"，多留一点余量，避免与双击判定擦边。
+TAP_EXTRA_MS: int = 20
 
 
 def _max_down_offset() -> int:
@@ -95,6 +100,14 @@ class PetWindow(QWidget):
         # 同一次物理按下可能被派发两次（子标签与窗口各一次），用它去重
         self._left_pressed: bool = False
         self._left_pressed_at: float = 0.0
+
+        # 单击（不拖动）切换暂停：起点、是否已经拖起来、以及延时触发的令牌
+        self._press_origin: QPoint | None = None
+        self._drag_moved: bool = False
+        self._tap_allowed: bool = False
+        self._tap_token: object | None = None
+        # 全局热键是否已注册（注册失败也照常工作，只是没有快捷键）
+        self._hotkey_registered: bool = False
 
         # 专注计时：计时器只管时间，科目与落库都不在这里
         self._timer = timer if timer is not None else FocusTimer()
@@ -143,6 +156,12 @@ class PetWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowTitle("CatStudy Pet")
+        self.setToolTip(
+            f"单击：暂停 / 继续（{hotkey.HOTKEY_LABEL}）\n"
+            "双击：学习记录\n"
+            "拖动：换个位置\n"
+            "右键：菜单"
+        )
 
     def _setup_ui(self) -> None:
         """搭建展示像素猫的标签，窗口预留呼吸余量并设置遮罩。"""
@@ -237,7 +256,8 @@ class PetWindow(QWidget):
         self.finish_action.setEnabled(active)
         self.discard_action.setEnabled(active)
         self.pause_action.setText(
-            "继续" if self._timer.state is TimerState.PAUSED else "暂停"
+            ("继续" if self._timer.state is TimerState.PAUSED else "暂停")
+            + f"（{hotkey.HOTKEY_LABEL}）"
         )
         # 勾选回填的是"偏好"，不是"当前是否可见"：Esc 收起本次后，
         # 开关仍应保持勾选，否则用户会以为偏好被自己弄丢了
@@ -331,14 +351,34 @@ class PetWindow(QWidget):
             self._show_overlay()
         return True
 
-    def toggle_pause(self) -> None:
-        """在暂停与继续之间切换。"""
-        if self._timer.state is TimerState.RUNNING:
+    def toggle_pause(self) -> bool:
+        """在暂停与继续之间切换；返回是否真的切换了（空闲时无事可做）。
+
+        暂停时小猫也停下来坐着——它跟着你的节奏走，不是自己在跑。
+        """
+        state = self._timer.state
+        if state is TimerState.RUNNING:
             self._timer.pause()
             self._bubble.set_text(self._paused_text(), accent=False)
-        elif self._timer.state is TimerState.PAUSED:
+            self._player.set_walking(False)
+            return True
+        if state is TimerState.PAUSED:
             self._timer.resume()
             self._bubble.set_text(self._timer.display_text())
+            self._player.set_walking(True)
+            return True
+        return False
+
+    def handle_hotkey(self) -> bool:
+        """全局热键触发时调用；返回是否切换了暂停。"""
+        return self.toggle_pause()
+
+    def nativeEvent(self, event_type, message):  # noqa: N802 (Qt 命名风格)
+        """接收系统的 ``WM_HOTKEY``：热键注册在桌宠自己的原生句柄上。"""
+        if hotkey.is_hotkey_message(event_type, message):
+            self.handle_hotkey()
+            return True, 0
+        return super().nativeEvent(event_type, message)
 
     def finish_focus(self) -> None:
         """手动结束并保存；秒数不足 1 分钟时不产生记录（由 main.py 判定）。"""
@@ -456,6 +496,18 @@ class PetWindow(QWidget):
         """窗口显示时启动动画，避免不可见时空转耗电。"""
         super().showEvent(event)
         self._player.start()
+        self._ensure_hotkey()
+
+    def _ensure_hotkey(self) -> None:
+        """注册全局暂停热键（只做一次；失败静默，功能降级为单击/菜单）。"""
+        if self._hotkey_registered:
+            return
+        self._hotkey_registered = hotkey.register(int(self.winId()))
+
+    @property
+    def hotkey_registered(self) -> bool:
+        """全局热键是否真的注册成功（测试与排障用）。"""
+        return self._hotkey_registered
 
     def hideEvent(self, event: QHideEvent) -> None:
         """窗口隐藏时停止动画。"""
@@ -480,6 +532,10 @@ class PetWindow(QWidget):
         """关闭桌宠时一并收掉气泡，避免留下一个无主的浮窗。"""
         self._tick.stop()
         self._bubble.close()
+        if self._hotkey_registered:
+            # 句柄马上失效，热键必须先解绑，否则系统里留一个按了没反应的组合键
+            hotkey.unregister(int(self.winId()))
+            self._hotkey_registered = False
         super().closeEvent(event)
 
     def _on_frame_changed(self, pixmap: QPixmap, offset: QPoint) -> None:
@@ -517,6 +573,10 @@ class PetWindow(QWidget):
         self._left_pressed = True
         self._left_pressed_at = now
 
+        # 任何一次新的按下都作废"待触发的单击"：那说明前面那次点击
+        # 是双击的前半程，不该在延时到点时把计时暂停掉
+        self._tap_token = None
+
         position = event.position().toPoint()
         is_double = (
             self._last_press_at is not None
@@ -530,6 +590,12 @@ class PetWindow(QWidget):
             self._last_press_at = now
         self._last_press_pos = position
 
+        # 这一次按下是否允许在释放时算作"单击切换暂停"：
+        # 双击的后半程不算（否则打开窗口的同时把计时停了）
+        self._tap_allowed = not is_double
+        self._press_origin = event.globalPosition().toPoint()
+        self._drag_moved = False
+
         self._drag_offset = (
             event.globalPosition().toPoint()
             - self.frameGeometry().topLeft()
@@ -537,20 +603,51 @@ class PetWindow(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """左键按住移动时，按光标位置同步移动窗口。"""
+        """左键按住移动时，按光标位置同步移动窗口。
+
+        位移小于 :data:`DOUBLE_CLICK_MAX_SHIFT` 时不移动窗口：手指微抖
+        不该让猫跑位，也不该让"单击"被误判成拖拽。
+        """
         if (
             self._drag_offset is not None
             and event.buttons() & Qt.MouseButton.LeftButton
         ):
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            current = event.globalPosition().toPoint()
+            if not self._drag_moved:
+                origin = self._press_origin
+                if (
+                    origin is not None
+                    and (current - origin).manhattanLength() <= DOUBLE_CLICK_MAX_SHIFT
+                ):
+                    return
+                self._drag_moved = True
+            self.move(current - self._drag_offset)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        """左键释放后结束拖拽状态。"""
+        """左键释放：结束拖拽；没拖起来的算一次单击。"""
         if event.button() == Qt.MouseButton.LeftButton:
             self._left_pressed = False
             self._drag_offset = None
+            self._press_origin = None
+            if self._tap_allowed and not self._drag_moved:
+                self._arm_tap()
+            self._tap_allowed = False
+            self._drag_moved = False
             event.accept()
+
+    def _arm_tap(self) -> None:
+        """延时确认这次点击不是双击的前半程，再把暂停交给它。"""
+        token = object()
+        self._tap_token = token
+        delay = QApplication.doubleClickInterval() + TAP_EXTRA_MS
+        QTimer.singleShot(delay, lambda: self._fire_tap(token))
+
+    def _fire_tap(self, token: object) -> None:
+        if self._tap_token is not token:
+            return  # 期间又来了一次按下（双击），这次单击作废
+        self._tap_token = None
+        self.toggle_pause()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """平台派发的双击（兜底路径）。

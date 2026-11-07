@@ -365,11 +365,12 @@ class PetTimerTests(unittest.TestCase):
         self.pet._sync_menu_state()
         self.assertFalse(self.pet.pomodoro_action.isEnabled())
         self.assertTrue(self.pet.pause_action.isEnabled())
-        self.assertEqual(self.pet.pause_action.text(), "暂停")
+        # 文案带上全局热键提示（"暂停（Ctrl+Alt+Space）"），只校验前缀
+        self.assertTrue(self.pet.pause_action.text().startswith("暂停"))
 
         self.pet.toggle_pause()
         self.pet._sync_menu_state()
-        self.assertEqual(self.pet.pause_action.text(), "继续")
+        self.assertTrue(self.pet.pause_action.text().startswith("继续"))
 
     def test_bubble_follows_window_move(self):
         self.pet.start_focus(TimerMode.STOPWATCH, subject="数学")
