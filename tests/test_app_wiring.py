@@ -53,11 +53,8 @@ class PetWindowEntryTest(unittest.TestCase):
 
     def test_menu_has_study_and_quit_actions(self) -> None:
         texts = [a.text() for a in self.pet._menu.actions() if not a.isSeparator()]
-        # 第一项是「专注」子菜单（番茄钟/正计时），其后是开机自启动与位置锁定
-        self.assertEqual(
-            texts,
-            ["专注", "开机自启动", "锁定位置", "学习记录…", "退出程序"],
-        )
+        # 第一项是「专注」子菜单（番茄钟/正计时），新增了开机自启动开关
+        self.assertEqual(texts, ["专注", "开机自启动", "学习记录…", "退出程序"])
 
     def test_menu_action_emits_request(self) -> None:
         self.pet.study_action.trigger()
