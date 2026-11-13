@@ -23,6 +23,7 @@ from core.accounts import AccountRepository
 from core.database import init_database
 from core.expenses import ExpenseRepository
 from core.journal import JournalRepository
+from core.preferences import PreferenceStore
 from core.study_records import StudyRecordRepository
 from ui.main_window import StudyWindowManager
 from ui.pet_window import PetWindow
@@ -95,7 +96,12 @@ def main() -> int:
             JournalRepository(db),
         )
 
-        pet = PetWindow(default_subject=last_subject(repository))
+        # 位置与锁定偏好落在 data/preferences.json，与数据库同目录：
+        # 学习数据装进 db，界面状态单独一个文件，删掉它只是让猫回到默认位置
+        pet = PetWindow(
+            default_subject=last_subject(repository),
+            preferences=PreferenceStore(),
+        )
         pet.studyRecordsRequested.connect(manager.open)
         pet.focusSessionFinished.connect(
             # 信号带的是 (模式, 科目, 秒数)，多出来的参数用 lambda 收敛掉

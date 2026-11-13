@@ -38,7 +38,7 @@
 - 流水：收入与支出、分类筛选、可选联动账户余额、当月结余与分类明细、
   金额支持算式（`6.9+2.49`）
 - 开机自启动开关（注册表）
-- 521 项自动化测试
+- 550 项自动化测试
 
 ### 1.2 明确没做（别以为是漏了）
 
@@ -115,7 +115,7 @@ CatStudy/
 ├── tools/
 │   ├── extract_walk_frames.py  # GIF → 像素矩阵 JSON
 │   └── make_desktop_shortcut.py# 生成桌面 .lnk
-└── tests/                      # 521 项 unittest
+└── tests/                      # 550 项 unittest
 ```
 
 ### 2.3 建环境
@@ -1180,6 +1180,33 @@ subject = QRect(area.x(), clock.bottom() + gap_subject,      area.width(), 52)
 
 附带行为：暂停时 `set_walking(False)`，猫跟着停下来坐着；继续时重新走。
 
+### 8.13 位置锁定与记忆 `core/preferences.py`
+
+"锁住"要解决的是两个不同的问题，一起做才完整：
+
+1. **别再被拖走**——瞄准猫打字、划触控板时，一次误拖就把猫甩到屏幕角落；
+2. **下次还在这里**——重启后猫回到默认位置，等于第一件事白做。
+
+所以位置锁 = **锁 + 记忆**，只有锁没有记忆，锁的意义会被下一次启动抹掉。
+
+| 决定 | 理由 |
+|---|---|
+| 偏好存 `data/preferences.json`，不进数据库 | 库里是学习数据，备份送人时不该连"猫坐在哪个角"一起送；也便于用户自己删掉复位 |
+| 不写注册表 | `autostart` 写 `HKCU\...\Run` 是系统只认那里；界面状态必须看得见、删得掉 |
+| 锁的是位置，不是交互 | 锁住后单击照常暂停，双击照常开面板——去洗手间时猫被锁住也得能点停 |
+| 松手时才落盘 | 一次拖拽触发上百次 `move`，每次都写文件既慢又没意义 |
+| 恢复位置放在 `showEvent` | 显示前 `move()` 会被系统再调整一次（`Qt.Tool` 尤其明显），显示后落位才是最终值 |
+
+**坐标夹取**（`clamp_position`）解决一个真实的丢猫场景：笔记本外接显示器拔掉后，
+记忆里的坐标落在已不存在的屏幕上，猫就此消失。判定用**窗口中心**而不是左上角——
+允许贴边挂半只猫（常见摆法），只有中心都跑出去才拉回**主屏**右下角。
+没有任何屏幕信息时原样返回：宁可不动，也不要凭空猜。
+
+文件写坏的兜底：``from_dict`` 面对任何脏内容（数组、字符串、`"x": "left"`、
+`"x": true`、只有一半坐标）都退回默认值。**`bool` 是 `int` 的子类**，不单独排掉的话
+`true` 会变成坐标 `(1, 1)`——猫跑到屏幕左上角，且怎么看都像"位置没记住"。
+写盘走"临时文件 + 原子替换"，断电不会留下半个 JSON。
+
 ---
 
 ## 9. 界面层
@@ -1601,7 +1628,7 @@ cd /d D:\CatStudy
 
 无显示器的环境需要 `set QT_QPA_PLATFORM=offscreen`，但**离屏下中文会渲染成方块、遮罩也不准**，只能验布局不能验观感。
 
-### 11.2 分布（521 项）
+### 11.2 分布（550 项）
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -1620,10 +1647,11 @@ cd /d D:\CatStudy
 | `test_journal.py` | 38 | 日记仓储（覆盖/空删/排序/月度边界/非法日期）、v6→v7 迁移、视图自动保存与切日、页签顺序 |
 | `test_notebook_view.py` | 12 | 科目标签、统计（今日合计、连续打卡） |
 | `test_quick_pause.py` | 9 | 单击（双击间隔后）暂停、抖动不算拖拽、拖拽不暂停、双击只开记录、热键返回值与状态、暂停时猫停走、菜单热键提示 |
+| `test_preferences.py` | 29 | 偏好读写（缺文件/半截 JSON/类型错/`bool` 不是坐标）、原子写、坐标夹取（贴边保留/多屏/主屏回退）、锁定后拖不动但单击照常、松手落盘、显示时恢复位置 |
 | `test_stats.py` | 36 | 区间边界（周一/月末/闰年）、扇区合并、占比文案、聚合查询（区间/空时长排除/条数口径）、环形图（整圆/空态/离屏渲染）、页面切换与空状态、主面板页签 |
 | `test_celebration.py` | 13 | 礼花纯函数（数量/速度界/重力/过期/不可变）、穿透窗口、自动消散、桌宠接线（文字区分/不足1分钟不放/新会话撤旧） |
 
-合计 521 项，全部通过。
+合计 550 项，全部通过。
 
 ### 11.3 四类测试策略
 
@@ -1841,11 +1869,12 @@ lnk.link_flags.IsUnicode = True
 | `core/accounts.py` | 424 | `Account`, `AccountRepository`, `NetWorth`, `Snapshot`, `ASSET`/`LIABILITY` | 资产/负债与快照 |
 | `core/journal.py` | 176 | `JournalEntry`, `JournalRepository`, `MAX_CONTENT_LENGTH` | 日记仓储 |
 | `core/expenses.py` | 447 | `Expense`, `ExpenseRepository`, `flow_delta`, `FLOW_EXPENSE/INCOME` | 收支流水仓储 + 账户联动 |
+| `core/preferences.py` | 148 | `PetPreferences`, `PreferenceStore`, `from_dict`, `clamp_position`, `DEFAULT_PATH` | 界面偏好（位置 / 锁定），明文 JSON |
 | `core/timer.py` | 198 | `FocusTimer`, `TimerMode`, `TimerState`, `format_clock` | 计时状态机 |
 | `core/autostart.py` | 114 | `is_enabled/set_enabled/command`, `RUN_KEY` | 注册表自启动 |
 | `core/growth.py` | 28 | `GrowthSystem` | 骨架，未实现 |
 | `ui/sprite.py` | 413 | `SpriteSheet`, `AnimationPlayer`, `FrameRoles`, `WALK_FRAME_MS` | 素材加载与动画调度 |
-| `ui/pet_window.py` | 678 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
+| `ui/pet_window.py` | 788 | `PetWindow`, `DEFAULT_SPRITE_PATH`, 三个 Signal | 桌宠窗口 |
 | `ui/timer_bubble.py` | 109 | `TimerBubble` | 独立气泡窗口 |
 | `ui/stats_view.py` | 275 | `StatsView`, `LEGEND_NAME_LIMIT` | 专注统计页（区间 + 环形图 + 图例） |
 | `ui/pie_chart.py` | 198 | `DonutChart`, `donut_path`, `SLICE_COLORS`, `color_for` | 科目占比环形图（纯自绘，无图表库） |

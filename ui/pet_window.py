@@ -29,6 +29,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMenu, QWidget
 
 from core import autostart
+from core.preferences import PetPreferences, PreferenceStore, clamp_position
 from core.timer import FocusTimer, TimerMode, TimerState
 from ui import hotkey
 from ui.celebration import CelebrationOverlay
@@ -68,6 +69,25 @@ def _max_down_offset() -> int:
     return max((off.y() for off in possible_offsets()), default=0)
 
 
+def _screen_areas() -> list[tuple[int, int, int, int]]:
+    """所有屏幕的可用区域（去掉任务栏），主屏排在第一个。
+
+    主屏放首位是为了给 ``clamp_position`` 一个确定的退路：记忆里的位置
+    什么都对不上时，猫应该回到主屏而不是随机的某块屏。
+    """
+    primary = QApplication.primaryScreen()
+    screens = list(QApplication.screens())
+    if primary in screens:
+        screens.remove(primary)
+        screens.insert(0, primary)
+
+    areas: list[tuple[int, int, int, int]] = []
+    for screen in screens:
+        rect = screen.availableGeometry()
+        areas.append((rect.x(), rect.y(), rect.width(), rect.height()))
+    return areas
+
+
 class PetWindow(QWidget):
     """桌面宠物悬浮窗。"""
 
@@ -89,9 +109,19 @@ class PetWindow(QWidget):
         sprite_path=None,
         default_subject: str = "专注",
         timer: FocusTimer | None = None,
+        preferences: PreferenceStore | None = None,
     ) -> None:
         super().__init__()
         self._drag_offset: QPoint | None = None
+
+        # 界面偏好（位置 + 是否锁定）。传 None 时只在内存里生效——
+        # 测试不该往用户真实的 data/preferences.json 里写东西。
+        self._pref_store: PreferenceStore | None = preferences
+        self._prefs: PetPreferences = (
+            preferences.load() if preferences is not None else PetPreferences()
+        )
+        # 记忆位置只在第一次显示时落一次，之后的 show/hide 不再抢用户拖动
+        self._position_restored: bool = False
 
         # 自行判定双击所需的状态（见 mousePressEvent 的说明）
         self._last_press_at: float | None = None
@@ -156,12 +186,20 @@ class PetWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowTitle("CatStudy Pet")
-        self.setToolTip(
-            f"单击：暂停 / 继续（{hotkey.HOTKEY_LABEL}）\n"
-            "双击：学习记录\n"
-            "拖动：换个位置\n"
-            "右键：菜单"
-        )
+        self.setToolTip(self._tooltip_text())
+
+    def _tooltip_text(self) -> str:
+        """悬停提示。锁定后必须把"拖动"换成解锁方法，否则用户会以为猫坏了。"""
+        lines = [
+            f"单击：暂停 / 继续（{hotkey.HOTKEY_LABEL}）",
+            "双击：学习记录",
+        ]
+        if self._prefs.locked:
+            lines.append("位置已锁定（右键 → 取消锁定位置）")
+        else:
+            lines.append("拖动：换个位置")
+        lines.append("右键：菜单")
+        return "\n".join(lines)
 
     def _setup_ui(self) -> None:
         """搭建展示像素猫的标签，窗口预留呼吸余量并设置遮罩。"""
@@ -233,6 +271,13 @@ class PetWindow(QWidget):
         self.autostart_action.setCheckable(True)
         self.autostart_action.toggled.connect(self._toggle_autostart)
 
+        # 锁定位置：勾上后拖不动，位置记到下次启动。
+        # 它锁的是"位置"，不是"交互"——单击暂停、双击开面板照常。
+        self.lock_action = self._menu.addAction("锁定位置")
+        self.lock_action.setCheckable(True)
+        self.lock_action.setToolTip("勾上后猫不再被拖动，位置会记到下次启动")
+        self.lock_action.toggled.connect(self._toggle_lock)
+
         self.study_action = self._menu.addAction("学习记录…")
         # triggered 会带一个 bool 参数，用 lambda 吞掉，避免多参传进无参信号
         self.study_action.triggered.connect(
@@ -242,6 +287,10 @@ class PetWindow(QWidget):
         self._menu.addSeparator()
         quit_action = self._menu.addAction("退出程序")
         quit_action.triggered.connect(QApplication.quit)
+
+        # 构造完先同步一次：勾选状态必须与偏好一致，否则"锁着但菜单没勾"
+        # 会在第一次打开菜单前一直骗人（aboutToShow 才刷新太晚）
+        self._sync_menu_state()
 
     def _sync_menu_state(self) -> None:
         """按计时器当前状态决定哪些菜单项可点。
@@ -264,6 +313,9 @@ class PetWindow(QWidget):
         self.fullscreen_action.blockSignals(True)
         self.fullscreen_action.setChecked(self._fullscreen_preferred)
         self.fullscreen_action.blockSignals(False)
+        self.lock_action.blockSignals(True)
+        self.lock_action.setChecked(self._prefs.locked)
+        self.lock_action.blockSignals(False)
         self._sync_autostart()
 
     # ---------- 全屏计时牌 ----------
@@ -292,6 +344,50 @@ class PetWindow(QWidget):
         """当前全屏计时牌（未创建时为 None；测试用）。"""
         return self._overlay
 
+
+    # ---------- 位置与锁定 ----------
+
+    @property
+    def locked(self) -> bool:
+        """位置是否已锁定（菜单回填与测试用）。"""
+        return self._prefs.locked
+
+    def _toggle_lock(self, checked: bool) -> None:
+        """菜单勾选切换。锁定时立刻中断正在进行的拖拽，避免手还没松就卡住。"""
+        self._prefs = self._prefs.with_locked(checked)
+        if checked:
+            self._drag_offset = None
+            self._drag_moved = False
+        self._save_prefs()
+        self.setToolTip(self._tooltip_text())
+
+    def _save_prefs(self) -> None:
+        """写盘。没有 store（测试环境）时什么都不做。"""
+        if self._pref_store is not None:
+            self._pref_store.save(self._prefs)
+
+    def _remember_position(self) -> None:
+        """把当前坐标写进偏好：下次启动猫还坐在这里。"""
+        self._prefs = self._prefs.with_position(self.x(), self.y())
+        self._save_prefs()
+
+    def _restore_position(self) -> None:
+        """按记忆位置落位；坐标已经不在任何屏幕上就拉回主屏。
+
+        为什么放在 ``showEvent`` 而不是 ``__init__``：窗口显示前 ``move()``
+        会被系统再调整一次（``Qt.Tool`` 尤其明显），显示后落位才是最终值。
+        """
+        position = self._prefs.position
+        if position is None:
+            return
+        x, y = clamp_position(
+            position[0], position[1], self.width(), self.height(), _screen_areas()
+        )
+        self.move(x, y)
+        if (x, y) != position:
+            # 顺手修掉记忆里那个失效坐标，免得每次启动都夹一次
+            self._prefs = self._prefs.with_position(x, y)
+            self._save_prefs()
 
     # ---------- 开机自启动 ----------
 
@@ -497,6 +593,10 @@ class PetWindow(QWidget):
         super().showEvent(event)
         self._player.start()
         self._ensure_hotkey()
+        # 只在第一次显示时落位：之后每次 show（比如从托盘回来）不该把猫拽回去
+        if not self._position_restored:
+            self._position_restored = True
+            self._restore_position()
 
     def _ensure_hotkey(self) -> None:
         """注册全局暂停热键（只做一次；失败静默，功能降级为单击/菜单）。"""
@@ -607,7 +707,12 @@ class PetWindow(QWidget):
 
         位移小于 :data:`DOUBLE_CLICK_MAX_SHIFT` 时不移动窗口：手指微抖
         不该让猫跑位，也不该让"单击"被误判成拖拽。
+
+        位置锁定时连"位移"都不认：不移动、也不置 ``_drag_moved``，
+        于是松手时仍按单击处理——锁的是位置，不是暂停。
         """
+        if self._prefs.locked:
+            return
         if (
             self._drag_offset is not None
             and event.buttons() & Qt.MouseButton.LeftButton
@@ -630,10 +735,15 @@ class PetWindow(QWidget):
             self._left_pressed = False
             self._drag_offset = None
             self._press_origin = None
-            if self._tap_allowed and not self._drag_moved:
+            moved = self._drag_moved
+            if self._tap_allowed and not moved:
                 self._arm_tap()
             self._tap_allowed = False
             self._drag_moved = False
+            if moved:
+                # 只在松手这一刻写盘：一次拖拽会触发上百次 move，
+                # 每次落盘既慢又毫无意义，用户要的是"松手后的位置"
+                self._remember_position()
             event.accept()
 
     def _arm_tap(self) -> None:
