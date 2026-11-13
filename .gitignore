@@ -8,6 +8,8 @@ ENV/
 # 保留 data/ 目录结构，但忽略其中的数据库文件；表结构与初始化代码照常入库
 data/*.db
 data/*.sqlite
+# 界面偏好（窗口坐标 / 锁定状态）：纯本地状态，不同机器的位置没意义
+data/preferences.json
 data/*.sqlite3
 *.db
 *.sqlite
